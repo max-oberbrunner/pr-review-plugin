@@ -7,15 +7,24 @@ A powerful, customizable pull request review command for Claude Code that helps 
 ### Installation
 
 **Option 1: Quick Install (Recommended)**
+
+Linux/macOS:
 ```bash
 git clone https://github.com/YOUR-USERNAME/pr-review-plugin.git
 cd pr-review-plugin
 ./scripts/install.sh
 ```
 
-> **Windows Users**: Run the install script from Git Bash (not PowerShell or Command Prompt)
+Windows (PowerShell):
+```powershell
+git clone https://github.com/YOUR-USERNAME/pr-review-plugin.git
+cd pr-review-plugin
+.\scripts\install.ps1
+```
 
 **Option 2: Manual Install**
+
+Linux/macOS:
 ```bash
 git clone https://github.com/YOUR-USERNAME/pr-review-plugin.git
 cd pr-review-plugin
@@ -25,6 +34,18 @@ cp commands/pr-review.md ~/.claude/commands/
 
 # Or create a symlink (allows automatic updates when you pull)
 ln -s "$(pwd)/commands/pr-review.md" ~/.claude/commands/pr-review.md
+```
+
+Windows (PowerShell):
+```powershell
+git clone https://github.com/YOUR-USERNAME/pr-review-plugin.git
+cd pr-review-plugin
+
+# Copy command to your Claude Code commands directory
+Copy-Item commands\pr-review.md $env:USERPROFILE\.claude\commands\
+
+# Or create a symlink (requires Admin or Developer Mode)
+New-Item -ItemType SymbolicLink -Path $env:USERPROFILE\.claude\commands\pr-review.md -Target "$PWD\commands\pr-review.md"
 ```
 
 ### Verify Installation
