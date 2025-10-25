@@ -1,4 +1,4 @@
-# PR Review Plugin - Windows Installation Script
+﻿# PR Review Plugin - Windows Installation Script
 # Automatically installs the PR review command to Claude Code
 
 #Requires -Version 5.1
@@ -381,7 +381,7 @@ function Write-NextSteps {
     Write-Host ""
     Write-Host "3. Configure Azure DevOps PAT:"
     Write-Host "   Copy .env.example to .env and add your PAT token"
-    Write-Host "   Create PAT at: https://dev.azure.com/{org}/_usersSettings/tokens"
+    Write-Host "   Create PAT at: https://dev.azure.com/`{org`}/_usersSettings/tokens"
     Write-Host ""
     Write-Host "4. Start or restart Claude Code:"
     Write-Host "   claude" -ForegroundColor Blue
