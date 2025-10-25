@@ -1,0 +1,7 @@
+# Azure DevOps PR Comment Fetcher Dependencies
+
+# HTTP library for API calls
+requests>=2.31.0
+
+# Load environment variables from .env file
+python-dotenv>=1.0.0
