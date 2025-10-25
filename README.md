@@ -13,6 +13,8 @@ cd pr-review-plugin
 ./scripts/install.sh
 ```
 
+> **Windows Users**: Run the install script from Git Bash (not PowerShell or Command Prompt)
+
 **Option 2: Manual Install**
 ```bash
 git clone https://github.com/YOUR-USERNAME/pr-review-plugin.git

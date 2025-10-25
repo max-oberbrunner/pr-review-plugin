@@ -40,6 +40,8 @@ cd pr-review-plugin
 ./scripts/install.sh
 ```
 
+> **Windows Users**: The install script requires Bash. Run it from **Git Bash** (included with Git for Windows), not PowerShell or Command Prompt.
+
 The script will:
 1. Detect your Claude Code commands directory
 2. Create a symbolic link to the command file
@@ -109,8 +111,9 @@ You should see the `/pr-review` command listed and be able to access its help in
 
 ### Windows
 - Default commands directory: `%USERPROFILE%\.claude\commands\`
-- Symbolic links require Administrator privileges
-- Use PowerShell or Git Bash for installation
+- **Automated install script**: Use Git Bash (included with Git for Windows)
+- **Manual symlink creation**: Requires PowerShell with Administrator privileges
+- **Manual copy**: Works with PowerShell, Command Prompt, or Git Bash
 
 ## Configuration
 
