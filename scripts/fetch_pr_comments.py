@@ -11,6 +11,7 @@ import json
 import os
 import sys
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, List, Optional
 from urllib.parse import quote
 
@@ -28,6 +29,15 @@ except ImportError:
 
 # Load environment variables from .env file
 load_dotenv()
+
+# Import status tracker
+try:
+    from status_tracker import create_status_tracker, CommentStatus
+except ImportError:
+    # Try to import from the same directory
+    script_dir = Path(__file__).parent
+    sys.path.insert(0, str(script_dir))
+    from status_tracker import create_status_tracker, CommentStatus
 
 
 class ADOCommentFetcher:
@@ -110,8 +120,71 @@ class ADOCommentFetcher:
             self._debug_log(f"Failed to fetch PR info: {e}")
             return {}
 
-    def format_markdown(self, pr_id: int, threads: List[Dict], pr_info: Optional[Dict] = None) -> str:
-        """Format threads as Markdown report."""
+    def _format_status_badge(self, thread: Dict) -> str:
+        """
+        Format status badge for a thread, combining custom and Azure status.
+
+        Args:
+            thread: Thread dict potentially with custom_status field
+
+        Returns:
+            Formatted status badge string
+        """
+        azure_status = thread.get("status", "unknown")
+        custom_status_data = thread.get("custom_status")
+
+        # Azure status emoji mapping
+        azure_emoji_map = {
+            "active": "[ACTIVE]",
+            "fixed": "[FIXED]",
+            "closed": "[CLOSED]",
+            "pending": "[PENDING]",
+            "wontFix": "[WONT_FIX]",
+            "byDesign": "[BY_DESIGN]"
+        }
+        azure_badge = azure_emoji_map.get(azure_status, "[UNKNOWN]")
+
+        # If no custom status, just return Azure status
+        if not custom_status_data:
+            return f"{azure_badge} *{azure_status}*"
+
+        # Has custom status - format based on combination
+        custom_status = custom_status_data.get('status', '')
+        note = custom_status_data.get('note', '')
+
+        # Show custom status prominently
+        if note:
+            custom_badge = f"[{custom_status} - {note}]"
+        else:
+            custom_badge = f"[{custom_status}]"
+
+        # Show transition if Azure status differs from what we'd expect
+        if custom_status == "COMPLETED" and azure_status == "fixed":
+            # Perfect alignment - show transition
+            return f"[COMPLETED→FIXED] *verified by reviewer*"
+        elif custom_status in ["COMPLETED", "IN_PROGRESS"] and azure_status == "active":
+            # You're working on it, still active in Azure
+            return f"{custom_badge} (Azure: {azure_badge})"
+        elif custom_status in ["SKIPPED", "BLOCKED"]:
+            # Special statuses - always show Azure status too
+            return f"{custom_badge} (Azure: {azure_badge})"
+        else:
+            # Default: show custom status with Azure in parentheses
+            return f"{custom_badge} (Azure: {azure_status})"
+
+    def format_markdown(self, pr_id: int, threads: List[Dict], pr_info: Optional[Dict] = None, working_dir: Optional[Path] = None) -> str:
+        """
+        Format threads as Markdown report with status tracking.
+
+        Args:
+            pr_id: Pull request ID
+            threads: List of thread dicts (may include custom_status from status_tracker)
+            pr_info: Optional PR metadata
+            working_dir: Working directory for status file location
+
+        Returns:
+            Formatted markdown string
+        """
         lines = []
 
         # Header
@@ -167,17 +240,10 @@ class ADOCommentFetcher:
                 lines.append("")
 
                 for thread in file_threads[location]:
-                    status = thread.get("status", "unknown")
-                    status_emoji = {
-                        "active": "[ACTIVE]",
-                        "fixed": "[FIXED]",
-                        "closed": "[CLOSED]",
-                        "pending": "[PENDING]",
-                        "wontFix": "[WONT_FIX]",
-                        "byDesign": "[BY_DESIGN]"
-                    }.get(status, "[UNKNOWN]")
+                    status_badge = self._format_status_badge(thread)
+                    thread_id = thread.get('id', 'N/A')
 
-                    lines.append(f"**Thread #{thread.get('id', 'N/A')}** {status_emoji} *{status}*")
+                    lines.append(f"**Thread #{thread_id}** {status_badge}")
                     lines.append("")
 
                     for comment in thread.get("comments", []):
@@ -201,17 +267,10 @@ class ADOCommentFetcher:
             lines.append("")
 
             for thread in general_threads:
-                status = thread.get("status", "unknown")
-                status_emoji = {
-                    "active": "[ACTIVE]",
-                    "fixed": "[FIXED]",
-                    "closed": "[CLOSED]",
-                    "pending": "[PENDING]",
-                    "wontFix": "[WONT_FIX]",
-                    "byDesign": "[BY_DESIGN]"
-                }.get(status, "[UNKNOWN]")
+                status_badge = self._format_status_badge(thread)
+                thread_id = thread.get('id', 'N/A')
 
-                lines.append(f"**Thread #{thread.get('id', 'N/A')}** {status_emoji} *{status}*")
+                lines.append(f"**Thread #{thread_id}** {status_badge}")
                 lines.append("")
 
                 for comment in thread.get("comments", []):
@@ -283,11 +342,25 @@ Examples:
         print(f"Fetching comments for PR #{args.pr}...", file=sys.stderr)
     threads = fetcher.fetch_pr_threads(args.pr)
 
+    # Load and merge status tracking if not in JSON mode
+    if not args.json:
+        # Determine working directory (where status file lives)
+        working_dir = Path(args.output).parent if args.output else Path.cwd()
+
+        # Load status tracker
+        status_tracker = create_status_tracker(args.pr, working_dir)
+        if status_tracker.statuses:
+            if not args.debug:
+                print(f"[INFO] Loaded {len(status_tracker.statuses)} tracked statuses", file=sys.stderr)
+
+        # Merge status info with threads
+        threads = status_tracker.merge_with_threads(threads)
+
     if args.json:
         output = json.dumps(threads, indent=2)
     else:
         pr_info = fetcher.fetch_pr_info(args.pr)
-        output = fetcher.format_markdown(args.pr, threads, pr_info)
+        output = fetcher.format_markdown(args.pr, threads, pr_info, working_dir)
 
     # Write output
     if args.output:
