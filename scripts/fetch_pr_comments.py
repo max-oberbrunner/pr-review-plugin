@@ -159,7 +159,7 @@ class ADOCommentFetcher:
 
         # Output file-specific comments
         if file_threads:
-            lines.append("## 📁 File Comments")
+            lines.append("## File Comments")
             lines.append("")
 
             for location in sorted(file_threads.keys()):
@@ -169,13 +169,13 @@ class ADOCommentFetcher:
                 for thread in file_threads[location]:
                     status = thread.get("status", "unknown")
                     status_emoji = {
-                        "active": "🔴",
-                        "fixed": "✅",
-                        "closed": "✔️",
-                        "pending": "⏳",
-                        "wontFix": "🚫",
-                        "byDesign": "📐"
-                    }.get(status, "❓")
+                        "active": "[ACTIVE]",
+                        "fixed": "[FIXED]",
+                        "closed": "[CLOSED]",
+                        "pending": "[PENDING]",
+                        "wontFix": "[WONT_FIX]",
+                        "byDesign": "[BY_DESIGN]"
+                    }.get(status, "[UNKNOWN]")
 
                     lines.append(f"**Thread #{thread.get('id', 'N/A')}** {status_emoji} *{status}*")
                     lines.append("")
@@ -197,19 +197,19 @@ class ADOCommentFetcher:
 
         # Output general comments
         if general_threads:
-            lines.append("## 💬 General Comments")
+            lines.append("## General Comments")
             lines.append("")
 
             for thread in general_threads:
                 status = thread.get("status", "unknown")
                 status_emoji = {
-                    "active": "🔴",
-                    "fixed": "✅",
-                    "closed": "✔️",
-                    "pending": "⏳",
-                    "wontFix": "🚫",
-                    "byDesign": "📐"
-                }.get(status, "❓")
+                    "active": "[ACTIVE]",
+                    "fixed": "[FIXED]",
+                    "closed": "[CLOSED]",
+                    "pending": "[PENDING]",
+                    "wontFix": "[WONT_FIX]",
+                    "byDesign": "[BY_DESIGN]"
+                }.get(status, "[UNKNOWN]")
 
                 lines.append(f"**Thread #{thread.get('id', 'N/A')}** {status_emoji} *{status}*")
                 lines.append("")
@@ -231,7 +231,7 @@ class ADOCommentFetcher:
         total_threads = len(threads)
         active_threads = len([t for t in threads if t.get("status") == "active"])
 
-        lines.append(f"## 📊 Summary")
+        lines.append(f"## Summary")
         lines.append("")
         lines.append(f"- **Total threads:** {total_threads}")
         lines.append(f"- **Active threads:** {active_threads}")
@@ -293,8 +293,14 @@ Examples:
     if args.output:
         with open(args.output, "w", encoding="utf-8") as f:
             f.write(output)
-        print(f"✓ Comments saved to {args.output}", file=sys.stderr)
+        print(f"[SUCCESS] Comments saved to {args.output}", file=sys.stderr)
     else:
+        # For console output, use sys.stdout with UTF-8 encoding
+        try:
+            sys.stdout.reconfigure(encoding='utf-8')
+        except AttributeError:
+            # Python < 3.7 fallback
+            pass
         print(output)
 
 

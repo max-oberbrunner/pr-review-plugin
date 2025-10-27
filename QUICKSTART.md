@@ -1,19 +1,21 @@
 # Quick Start Guide
 
-Get up and running with PR Review Plugin in 5 minutes!
+Get up and running with Azure DevOps PR Review Plugin in 5 minutes!
 
-## ⚡ 1-Minute Setup
+## ⚡ 5-Minute Setup
 
-```bash
-# Clone and install
-git clone https://github.com/YOUR-USERNAME/pr-review-plugin.git
+```powershell
+# Clone and install (Windows PowerShell)
+git clone <YOUR_REPO_URL>
 cd pr-review-plugin
-./scripts/install.sh
-
-# Start using it
-claude
-/pr-review
+.\scripts\install.ps1
 ```
+
+The installer will prompt you for:
+- Azure DevOps Organization (e.g., "cudirect")
+- Project name (e.g., "Origence")
+- Repository name (e.g., "arcOS.Web")
+- Your Personal Access Token (PAT)
 
 That's it! 🎉
 
@@ -21,92 +23,111 @@ That's it! 🎉
 
 Before installing, make sure you have:
 
-- [ ] Claude Code installed (`claude --version`)
+- [ ] Python 3.8+ installed (`python --version`)
 - [ ] Git installed (`git --version`)
-- [ ] (Optional) GitHub CLI installed and authenticated (`gh auth status`)
+- [ ] Azure DevOps account with access to your repos
+- [ ] Personal Access Token with Code (Read) scope
 
-Missing something? See [INSTALLATION.md](docs/INSTALLATION.md) for setup help.
+**Don't have a PAT?** See section below on creating one.
+
+## 🔑 Creating Your Azure DevOps PAT
+
+1. Go to: https://dev.azure.com/YOUR-ORG/_usersSettings/tokens
+2. Click "New Token"
+3. Name: "Claude Code PR Review"
+4. Expiration: 90 days (or custom)
+5. Scope: Select "Code" → "Read"
+6. Click "Create" and **copy the token immediately**
 
 ## 🎯 First Review
 
-### Try It On Your Current Branch
-
-```bash
-# 1. Switch to a branch with changes
-git checkout feature/your-branch
-
-# 2. Start Claude Code
-claude
-
-# 3. Run the review
-/pr-review
+In Claude Code, run:
+```
+/pr-review 87663
 ```
 
-### Try It On a GitHub PR
+Replace `87663` with your PR number from Azure DevOps.
 
-```bash
-# In Claude Code
-/pr-review #123
+Claude will:
+1. Fetch all review comments
+2. Create a task list of active comments
+3. Guide you through fixing each one
+4. Show code context and explain why changes are needed
+5. Offer to commit the fixes
+
+## 🚀 Example Session
+
 ```
+You: /pr-review 87663
 
-## 🚀 Common Commands
+Claude: PR #87663: CUNA Protection Advisor Settings
 
-| Command | What It Does |
-|---------|--------------|
-| `/pr-review` | Review current branch changes |
-| `/pr-review #123` | Review PR #123 from GitHub |
-| `/pr-review --quick` | Fast surface-level review |
-| `/pr-review --focus=security` | Security-focused review |
-| `/pr-review --help` | Show all options |
+Found 5 active comments from Jason Wismer:
+
+cuna-protection-advisor-data.service.ts:23 - Use lenderIdentityDataService
+cuna-protection-advisor-settings.component.ts:130 - Avoid effects pattern
+GetCunaProtectionAdvisorSettingsRequest.cs:7 - Check Required message
+...
+
+Which should we tackle first?
+  A) Go in order (recommended)
+  B) Let me choose
+
+You: A
+
+Claude: [Shows code, explains the issue, makes the fix or asks you to]
+```
 
 ## 💡 Pro Tips
 
-### Tip 1: Start Small
-Try reviewing a small PR first to see what the tool does.
+### Keep Your Token Updated
+PAT tokens expire! When yours expires, just edit `~/.claude/ado-config.json` and update the `token` field.
 
-### Tip 2: Use Quick Mode
-Use `--quick` for rapid feedback during development.
+### Multiple Repos
+Working on multiple repos? You can manually edit the config to switch between them, or keep multiple config files and swap them.
 
-### Tip 3: Focus Reviews
-Use `--focus=security` or `--focus=performance` to zero in on specific concerns.
+### Share With Your Team
+Your teammates can use the same org/project/repo settings, but everyone needs their own PAT token.
 
-### Tip 4: Create Aliases
-Add to your `.bashrc` or `.zshrc`:
-```bash
-alias prq="claude /pr-review --quick"
-alias prs="claude /pr-review --focus=security"
-```
+## 🆘 Troubleshooting
 
-## 🎓 Learn More
+**"Error: Config file not found"**
+- Run `.\scripts\install.ps1` again
 
-- **Usage Examples**: See [EXAMPLES.md](docs/EXAMPLES.md) for 20+ scenarios
-- **Customization**: Read [CUSTOMIZATION.md](docs/CUSTOMIZATION.md) to tailor it
-- **Troubleshooting**: Check [INSTALLATION.md](docs/INSTALLATION.md#troubleshooting)
+**"Authentication failed"**
+- Check your PAT in `~/.claude/ado-config.json`
+- Verify it has Code (Read) scope
+- Check if it's expired
 
-## 🆘 Need Help?
+**"Python not found"**
+- Install Python 3.8+ from python.org
+- Update `pythonPath` in the config
 
-**Command not found?**
-- Restart Claude Code
-- Check `~/.claude/commands/pr-review.md` exists
+**"No active comments"**
+- Great! Your PR has been fully reviewed
+- Or the reviewer hasn't left comments yet
 
-**Can't access PRs?**
-- Run `gh auth login` to authenticate GitHub CLI
+## 📁 Files Created
 
-**Other issues?**
-- See [INSTALLATION.md - Troubleshooting](docs/INSTALLATION.md#troubleshooting)
-- [Report an issue](https://github.com/YOUR-USERNAME/pr-review-plugin/issues)
+- `~/.claude/ado-config.json` - Configuration (includes PAT)
+- `~/.claude/commands/pr-review.md` - The slash command
+
+## 🤝 Sharing With Teammates
+
+1. Push this plugin repo to a shared location
+2. Have teammates run:
+   ```powershell
+   git clone <YOUR_REPO_URL>
+   cd pr-review-plugin
+   .\scripts\install.ps1
+   ```
+3. They'll be prompted for the same info
+4. Each person needs their own PAT token
 
 ## 🎉 You're Ready!
 
-Now you're ready to catch bugs, improve code quality, and ship with confidence!
-
-Happy reviewing! 🚀
+You're now ready to address PR comments efficiently with Claude!
 
 ---
 
-**Next Steps:**
-1. ✅ Complete installation
-2. ✅ Try your first review
-3. 📖 Explore [EXAMPLES.md](docs/EXAMPLES.md)
-4. 🔧 Customize for your team ([CUSTOMIZATION.md](docs/CUSTOMIZATION.md))
-5. 🤝 Share with teammates
+**Need more help?** Check the full [README.md](README.md)

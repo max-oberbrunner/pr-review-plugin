@@ -317,21 +317,65 @@ function New-ConfigFile {
         }
     }
 
-    # Create template configuration
+    Write-Host ""
+    Write-Host "Azure DevOps Configuration" -ForegroundColor Cyan
+    Write-Host "═══════════════════════════" -ForegroundColor Cyan
+    Write-Host ""
+
+    # Prompt for configuration values
+    $organization = Read-Host "Azure DevOps Organization (e.g., 'cudirect')"
+    $project = Read-Host "Project name (e.g., 'Origence')"
+    $repository = Read-Host "Repository name (e.g., 'arcOS.Web')"
+
+    # Auto-detect Python
+    Write-Host ""
+    Write-Info "Detecting Python installation..."
+    try {
+        $pythonCmd = Get-Command python -ErrorAction Stop
+        $pythonPath = $pythonCmd.Source
+        Write-Success "Found Python at: $pythonPath"
+        $usePython = Read-Host "Use this Python? (Y/N)"
+        if ($usePython -ne 'Y' -and $usePython -ne 'y') {
+            $pythonPath = Read-Host "Enter Python executable path"
+        }
+    }
+    catch {
+        Write-Warning "Python not found in PATH"
+        $pythonPath = Read-Host "Enter Python executable path"
+    }
+
+    # Set script path (relative to plugin directory)
+    $scriptPath = Join-Path $ScriptDir "fetch_pr_comments.py"
+    Write-Info "Script path: $scriptPath"
+
+    # Prompt for PAT token
+    Write-Host ""
+    Write-Host "Azure DevOps Personal Access Token (PAT)" -ForegroundColor Yellow
+    Write-Info "Create a token at: https://dev.azure.com/$organization/_usersSettings/tokens"
+    Write-Info "Required scope: Code (Read)"
+    Write-Host ""
+    $token = Read-Host "Enter your PAT token" -AsSecureString
+    $tokenPlainText = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+        [Runtime.InteropServices.Marshal]::SecureStringToBSTR($token))
+
+    # Create configuration object
     $configTemplate = @{
-        organization = "your-organization"
-        project = "your-project"
-        repository = "your-repository"
-        scriptPath = "C:\path\to\pr-comments-fetch.py"
-        pythonPath = "C:\path\to\python.exe"
+        comment = "Azure DevOps Configuration for PR Comment Fetcher"
+        organization = $organization
+        project = $project
+        repository = $repository
+        scriptPath = $scriptPath
+        pythonPath = $pythonPath
+        token = $tokenPlainText
+        debugMode = $false
+        autoFormatForClaudeCode = $true
     }
 
     $configJson = $configTemplate | ConvertTo-Json
     $configJson | Out-File -FilePath $ConfigFile -Encoding UTF8
 
     Write-Success "Created configuration file: $ConfigFile"
-    Write-Warning "You MUST edit this file with your Azure DevOps settings!"
-    Write-Info "Required values: organization, project, repository, scriptPath, pythonPath"
+    Write-Host ""
 }
 
 function Test-Installation {

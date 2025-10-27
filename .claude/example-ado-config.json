@@ -1,0 +1,11 @@
+{
+  "comment": "Azure DevOps Configuration for PR Comment Fetcher - Copy to ~/.claude/ado-config.json",
+  "organization": "your-organization",
+  "project": "your-project",
+  "repository": "your-repository",
+  "scriptPath": "ABSOLUTE_PATH_TO\\pr-review-plugin\\scripts\\fetch_pr_comments.py",
+  "pythonPath": "ABSOLUTE_PATH_TO\\python.exe",
+  "token": "YOUR_AZURE_DEVOPS_PAT_HERE",
+  "debugMode": false,
+  "autoFormatForClaudeCode": true
+}
