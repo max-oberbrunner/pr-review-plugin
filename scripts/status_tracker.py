@@ -14,6 +14,7 @@ from typing import Dict, List, Optional
 
 class CommentStatus:
     """Valid custom status values for comments."""
+    ACTIVE = "ACTIVE"
     COMPLETED = "COMPLETED"
     IN_PROGRESS = "IN_PROGRESS"
     SKIPPED = "SKIPPED"
@@ -21,7 +22,7 @@ class CommentStatus:
 
     @classmethod
     def all_statuses(cls):
-        return [cls.COMPLETED, cls.IN_PROGRESS, cls.SKIPPED, cls.BLOCKED]
+        return [cls.ACTIVE, cls.COMPLETED, cls.IN_PROGRESS, cls.SKIPPED, cls.BLOCKED]
 
 
 class StatusTracker:
@@ -98,7 +99,7 @@ class StatusTracker:
 
         Args:
             thread_id: The thread ID
-            status: One of CommentStatus values (COMPLETED, IN_PROGRESS, SKIPPED, BLOCKED)
+            status: One of CommentStatus values (ACTIVE, COMPLETED, IN_PROGRESS, SKIPPED, BLOCKED)
             note: Optional note/reason for the status
         """
         if status not in CommentStatus.all_statuses():

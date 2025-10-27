@@ -162,7 +162,10 @@ class ADOCommentFetcher:
         if custom_status == "COMPLETED" and azure_status == "fixed":
             # Perfect alignment - show transition
             return f"[COMPLETED→FIXED] *verified by reviewer*"
-        elif custom_status in ["COMPLETED", "IN_PROGRESS"] and azure_status == "active":
+        elif custom_status == "ACTIVE" and azure_status == "active":
+            # Custom ACTIVE aligns with Azure - just show the custom badge with note if present
+            return custom_badge if note else f"{azure_badge} *{azure_status}*"
+        elif custom_status in ["COMPLETED", "IN_PROGRESS", "ACTIVE"] and azure_status == "active":
             # You're working on it, still active in Azure
             return f"{custom_badge} (Azure: {azure_badge})"
         elif custom_status in ["SKIPPED", "BLOCKED"]:

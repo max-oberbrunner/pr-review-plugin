@@ -9,6 +9,7 @@ When you mark a comment with a custom status, it's saved to `pr-{NUMBER}-status.
 
 ### Available Statuses
 
+- **ACTIVE** - Mark as active with a custom note (e.g., "High priority" or "Needs design review")
 - **COMPLETED** - You've fully addressed this comment
 - **IN_PROGRESS** - Currently working on this comment
 - **SKIPPED** - Intentionally skipping (e.g., "Will address in separate PR")
@@ -52,6 +53,9 @@ python "C:\Users\Max.Oberbrunner\pr-review-plugin\scripts\update_status.py" <PR_
 **Examples:**
 
 ```bash
+# Mark as active with custom note
+python update_status.py 87663 782167 ACTIVE --note "High priority - address first"
+
 # Mark as completed
 python update_status.py 87663 782180 COMPLETED --note "Implemented lenderIdentityDataService"
 
