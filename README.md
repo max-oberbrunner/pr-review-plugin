@@ -13,17 +13,69 @@ An Azure DevOps pull request review automation tool for Claude Code that fetches
 
 ### Installation
 
-**Windows (PowerShell 5.1+):**
-```powershell
+#### Step 1: Clone the Repository
+
+```bash
 git clone https://github.com/max-oberbrunner/pr-review-plugin.git
 cd pr-review-plugin
+```
+
+#### Step 2: Set Up Python Dependencies
+
+Choose one of the following options:
+
+**Option A: Direct Installation (Recommended)**
+
+Install dependencies directly to your Python environment:
+
+```bash
+# Navigate to the scripts directory
+cd scripts
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Return to repo root
+cd ..
+```
+
+**Option B: Using Virtual Environment**
+
+Create an isolated Python environment:
+
+**Windows (PowerShell 5.1+):**
+```powershell
+# Create virtual environment
+python -m venv venv
+
+# Activate virtual environment
+.\venv\Scripts\Activate.ps1
+
+# Install dependencies
+pip install -r scripts/requirements.txt
+```
+
+**macOS/Linux (Bash):**
+```bash
+# Create virtual environment
+python -m venv venv
+
+# Activate virtual environment
+source venv/bin/activate
+
+# Install dependencies
+pip install -r scripts/requirements.txt
+```
+
+#### Step 3: Configure Azure DevOps Integration
+
+**Windows (PowerShell 5.1+):**
+```powershell
 .\scripts\install.ps1
 ```
 
 **macOS/Linux (Bash):**
 ```bash
-git clone https://github.com/max-oberbrunner/pr-review-plugin.git
-cd pr-review-plugin
 ./scripts/install.sh
 ```
 
@@ -33,8 +85,7 @@ The installer will:
 3. Auto-detect your Python installation path
 4. Request your Azure DevOps Personal Access Token
 5. Create the configuration file at `~/.claude/ado-config.json`
-6. Install Python dependencies (`requests`, `python-dotenv`)
-7. Register the `/pr-review` command in Claude Code
+6. Register the `/pr-review` command in Claude Code
 
 ### Creating Your Azure DevOps Personal Access Token
 
@@ -285,8 +336,11 @@ See [docs/CUSTOMIZATION.md](docs/CUSTOMIZATION.md) for:
 - Run `python --version` to verify installation
 
 **"ModuleNotFoundError: requests"**
-- Install dependencies: `pip install -r scripts/requirements.txt`
-- Verify dependencies: `requests>=2.31.0`, `python-dotenv>=1.0.0`
+- Ensure you've completed Step 2 of the installation:
+  - **Option A**: From repo root: `cd scripts && pip install -r requirements.txt && cd ..`
+  - **Option B**: With venv activated: `pip install -r scripts/requirements.txt`
+- Verify dependencies installed: `requests>=2.31.0`, `python-dotenv>=1.0.0`
+- If using Option B, ensure venv is activated in your current terminal session
 
 ### Configuration Issues
 
@@ -357,7 +411,9 @@ requests>=2.31.0       # HTTP library for API calls
 python-dotenv>=1.0.0   # Environment variable management
 ```
 
-Install with: `pip install -r scripts/requirements.txt`
+These dependencies are installed during Step 2 of the installation process:
+- **Option A (Direct)**: `cd scripts && pip install -r requirements.txt && cd ..`
+- **Option B (Virtual Environment)**: With venv activated: `pip install -r scripts/requirements.txt`
 
 ## 🎯 Use Cases
 
