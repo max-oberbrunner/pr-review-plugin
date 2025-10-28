@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(C:UsersMax.OberbrunnerAppDataLocalProgramsPythonPython313python.exe --version)",
-      "Bash(\"C:\\Users\\Max.Oberbrunner\\AppData\\Local\\Programs\\Python\\Python313\\python.exe\" --version)"
+      "Bash(\"C:\\Users\\Max.Oberbrunner\\AppData\\Local\\Programs\\Python\\Python313\\python.exe\" --version)",
+      "Bash(tree:*)"
     ],
     "deny": [],
     "ask": []

@@ -38,7 +38,10 @@ class StatusTracker:
         """
         self.pr_number = pr_number
         self.working_dir = working_dir or Path.cwd()
-        self.status_file = self.working_dir / f"pr-{pr_number}-status.json"
+        # Store status files in .pr-status folder
+        status_dir = self.working_dir / ".pr-status"
+        status_dir.mkdir(exist_ok=True)
+        self.status_file = status_dir / f"pr-{pr_number}-status.json"
         self.statuses = {}
 
     def load(self) -> bool:

@@ -17,6 +17,7 @@ Desktop.ini
 .project
 .classpath
 .settings/
+settings.local.json
 
 # Logs
 *.log
@@ -54,3 +55,6 @@ build/
 # Backup Files
 *.bak
 *.backup
+
+# PR Review Status Files
+.pr-status/
