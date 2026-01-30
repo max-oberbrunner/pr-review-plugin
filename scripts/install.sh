@@ -235,6 +235,45 @@ verify_installation() {
     fi
 }
 
+# Run setup wizard
+run_setup_wizard() {
+    local wizard_script="$SCRIPT_DIR/setup_wizard.py"
+
+    if [[ ! -f "$wizard_script" ]]; then
+        print_warning "Setup wizard not found: $wizard_script"
+        return 1
+    fi
+
+    # Detect Python
+    local python_cmd=""
+    if command -v python3 &> /dev/null; then
+        python_cmd="python3"
+    elif command -v python &> /dev/null; then
+        python_cmd="python"
+    fi
+
+    if [[ -z "$python_cmd" ]]; then
+        print_warning "Python not found - cannot run setup wizard"
+        return 1
+    fi
+
+    echo ""
+    print_info "Would you like to run the setup wizard to configure Azure DevOps?"
+    read -p "Run setup wizard? (y/n) " -n 1 -r
+    echo
+
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        print_info "Starting setup wizard..."
+        echo ""
+        "$python_cmd" "$wizard_script"
+        return $?
+    else
+        print_info "Skipping setup wizard. You can run it later with:"
+        echo -e "   ${BLUE}python $wizard_script${NC}"
+        return 0
+    fi
+}
+
 # Print next steps
 print_next_steps() {
     echo ""
@@ -251,7 +290,7 @@ print_next_steps() {
     echo -e "   ${BLUE}/pr-review --help${NC}"
     echo ""
     echo "3. Try it on a test PR:"
-    echo -e "   ${BLUE}/pr-review${NC}"
+    echo -e "   ${BLUE}/pr-review 12345${NC}"
     echo ""
     echo "4. Read the documentation:"
     echo "   - Usage examples: docs/EXAMPLES.md"
@@ -275,6 +314,9 @@ main() {
     install_command
 
     if verify_installation; then
+        # Offer to run setup wizard
+        run_setup_wizard
+
         print_next_steps
         exit 0
     else

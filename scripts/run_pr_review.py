@@ -9,9 +9,57 @@ configuration and handling all the complexity.
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+# Import token manager and error messages from same directory
+script_dir = Path(__file__).parent
+sys.path.insert(0, str(script_dir))
+
+try:
+    from token_manager import resolve_token, KEYRING_AVAILABLE
+except ImportError:
+    # Fallback if token_manager not available
+    KEYRING_AVAILABLE = False
+    def resolve_token(config=None, prompt_if_missing=True):
+        token = os.getenv('AZURE_DEVOPS_PAT')
+        if token:
+            return (token, 'env')
+        if config and config.get('token'):
+            return (config.get('token'), 'config')
+        return (None, 'none')
+
+try:
+    from error_messages import config_missing_error, token_invalid_error, path_not_found_error
+except ImportError:
+    # Fallback if error_messages not available
+    def config_missing_error():
+        return "ERROR: Configuration file not found at ~/.claude/ado-config.json"
+    def token_invalid_error(reason):
+        return f"ERROR: Invalid token - {reason}"
+    def path_not_found_error(path_type, path):
+        return f"ERROR: {path_type} not found at: {path}"
+
+
+def find_script_path():
+    """Auto-detect fetch_pr_comments.py relative to this script."""
+    return str(Path(__file__).parent / "fetch_pr_comments.py")
+
+
+def find_python_path():
+    """Auto-detect Python interpreter."""
+    # First try current Python interpreter
+    if sys.executable:
+        return sys.executable
+
+    # Try to find python3 or python in PATH
+    python_cmd = shutil.which('python3') or shutil.which('python')
+    if python_cmd:
+        return python_cmd
+
+    return None
 
 
 def find_config_file():
@@ -37,32 +85,38 @@ def load_config(config_path):
             with open(config_path, 'r', encoding='utf-8') as f:
                 config = json.load(f)
 
-        # Validate required fields
-        required = ['organization', 'project', 'repository', 'scriptPath', 'pythonPath', 'token']
+        # Only require org, project, repository - paths and token are auto-detected
+        required = ['organization', 'project', 'repository']
         missing = [field for field in required if field not in config or not config[field]]
 
         if missing:
             print(f"ERROR: Missing required fields in config: {', '.join(missing)}", file=sys.stderr)
             return None
 
-        # Validate token
-        token = config['token']
-        if len(token) < 20:
-            print("ERROR: Token appears invalid (too short)", file=sys.stderr)
+        # Auto-fill missing paths
+        if not config.get('scriptPath'):
+            config['scriptPath'] = find_script_path()
+            print(f"[INFO] Auto-detected script path: {config['scriptPath']}", file=sys.stderr)
+
+        if not config.get('pythonPath'):
+            config['pythonPath'] = find_python_path()
+            if config['pythonPath']:
+                print(f"[INFO] Auto-detected Python path: {config['pythonPath']}", file=sys.stderr)
+            else:
+                print("ERROR: Could not auto-detect Python interpreter", file=sys.stderr)
+                return None
+
+        # Validate paths exist (if explicitly provided, validate them)
+        if config.get('pythonPath') and not Path(config['pythonPath']).exists():
+            print(path_not_found_error('Python', config['pythonPath']), file=sys.stderr)
             return None
 
-        if token in ['YOUR_AZURE_DEVOPS_PAT_HERE', 'PLACEHOLDER_TOKEN_NEEDS_TO_BE_SET']:
-            print("ERROR: Please set a valid PAT token in ~/.claude/ado-config.json", file=sys.stderr)
+        if config.get('scriptPath') and not Path(config['scriptPath']).exists():
+            print(path_not_found_error('Script', config['scriptPath']), file=sys.stderr)
             return None
 
-        # Validate paths exist
-        if not Path(config['pythonPath']).exists():
-            print(f"ERROR: Python not found at: {config['pythonPath']}", file=sys.stderr)
-            return None
-
-        if not Path(config['scriptPath']).exists():
-            print(f"ERROR: Script not found at: {config['scriptPath']}", file=sys.stderr)
-            return None
+        # Token resolution is handled separately in main() using token_manager
+        # We don't validate token here anymore - it's done via resolve_token()
 
         return config
 
@@ -74,7 +128,7 @@ def load_config(config_path):
         return None
 
 
-def run_fetch_script(config, pr_number, output_file):
+def run_fetch_script(config, pr_number, output_file, token):
     """Execute the fetch_pr_comments.py script."""
     cmd = [
         config['pythonPath'],
@@ -83,7 +137,7 @@ def run_fetch_script(config, pr_number, output_file):
         '--project', config['project'],
         '--repo', config['repository'],
         '--pr', str(pr_number),
-        '--token', config['token'],
+        '--token', token,
         '--output', str(output_file)
     ]
 
@@ -122,6 +176,7 @@ def main():
     parser.add_argument('pr_number', type=int, help='Pull request number')
     parser.add_argument('--output', '-o', help='Output file path (default: pr-{NUMBER}-comments.md in current directory)')
     parser.add_argument('--config', help='Path to config file (default: ~/.claude/ado-config.json)')
+    parser.add_argument('--token', help='Override token (or use AZURE_DEVOPS_PAT env var)')
 
     args = parser.parse_args()
 
@@ -132,16 +187,7 @@ def main():
         config_path = find_config_file()
 
     if not config_path or not config_path.exists():
-        print("ERROR: Configuration file not found at ~/.claude/ado-config.json", file=sys.stderr)
-        print("\nPlease create the file with:", file=sys.stderr)
-        print('{', file=sys.stderr)
-        print('  "organization": "your-org",', file=sys.stderr)
-        print('  "project": "your-project",', file=sys.stderr)
-        print('  "repository": "your-repo",', file=sys.stderr)
-        print('  "scriptPath": "path/to/fetch_pr_comments.py",', file=sys.stderr)
-        print('  "pythonPath": "path/to/python",', file=sys.stderr)
-        print('  "token": "your-azure-devops-pat"', file=sys.stderr)
-        print('}', file=sys.stderr)
+        print(config_missing_error(), file=sys.stderr)
         sys.exit(1)
 
     print(f"[INFO] Loading configuration from {config_path}", file=sys.stderr)
@@ -152,6 +198,29 @@ def main():
 
     print("[SUCCESS] Configuration validated", file=sys.stderr)
 
+    # Resolve token using layered approach (env > keychain > config > prompt)
+    if args.token:
+        # Token provided via command line
+        token = args.token
+        token_source = 'cli'
+    else:
+        # Use token_manager for layered resolution
+        token, token_source = resolve_token(config, prompt_if_missing=True)
+
+    if not token:
+        print(token_invalid_error("No token found or provided"), file=sys.stderr)
+        sys.exit(1)
+
+    # Log token source (but not the token itself)
+    source_messages = {
+        'env': 'environment variable (AZURE_DEVOPS_PAT)',
+        'keychain': 'system keychain',
+        'config': 'config file (consider migrating to keychain)',
+        'prompt': 'user input',
+        'cli': 'command line argument'
+    }
+    print(f"[INFO] Using token from: {source_messages.get(token_source, token_source)}", file=sys.stderr)
+
     # Determine output file
     if args.output:
         output_file = Path(args.output)
@@ -161,7 +230,7 @@ def main():
     print(f"[INFO] Fetching comments for PR #{args.pr_number}...", file=sys.stderr)
 
     # Run the fetch script
-    success = run_fetch_script(config, args.pr_number, output_file)
+    success = run_fetch_script(config, args.pr_number, output_file, token)
 
     if success:
         print(f"[SUCCESS] Comments saved to: {output_file}", file=sys.stderr)

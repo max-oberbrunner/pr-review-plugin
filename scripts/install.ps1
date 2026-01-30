@@ -297,8 +297,52 @@ function Install-Command {
     }
 }
 
-function New-ConfigFile {
+function Invoke-SetupWizard {
     Write-Info "Setting up configuration..."
+
+    $wizardScript = Join-Path $ScriptDir "setup_wizard.py"
+
+    if (-not (Test-Path $wizardScript)) {
+        Write-Warning "Setup wizard not found: $wizardScript"
+        Write-Info "Falling back to manual configuration..."
+        New-ConfigFileManual
+        return
+    }
+
+    # Detect Python
+    $pythonCmd = $null
+    try {
+        $pythonCmd = (Get-Command python -ErrorAction Stop).Source
+    }
+    catch {
+        try {
+            $pythonCmd = (Get-Command python3 -ErrorAction Stop).Source
+        }
+        catch {
+            Write-Warning "Python not found - cannot run setup wizard"
+            Write-Info "Falling back to manual configuration..."
+            New-ConfigFileManual
+            return
+        }
+    }
+
+    Write-Host ""
+    $response = Read-Host "Would you like to run the setup wizard to configure Azure DevOps? (Y/N)"
+
+    if ($response -eq 'Y' -or $response -eq 'y') {
+        Write-Info "Starting setup wizard..."
+        Write-Host ""
+        & $pythonCmd $wizardScript
+    }
+    else {
+        Write-Info "Skipping setup wizard. You can run it later with:"
+        Write-Host "   python $wizardScript" -ForegroundColor Blue
+    }
+}
+
+function New-ConfigFileManual {
+    # Legacy manual config creation (fallback if wizard unavailable)
+    Write-Info "Manual configuration setup..."
 
     # Create .claude directory if it doesn't exist
     if (-not (Test-Path $ConfigDir)) {
@@ -323,50 +367,16 @@ function New-ConfigFile {
     Write-Host ""
 
     # Prompt for configuration values
-    $organization = Read-Host "Azure DevOps Organization (e.g., 'cudirect')"
-    $project = Read-Host "Project name (e.g., 'Origence')"
-    $repository = Read-Host "Repository name (e.g., 'arcOS.Web')"
+    $organization = Read-Host "Azure DevOps Organization (e.g., 'contoso')"
+    $project = Read-Host "Project name"
+    $repository = Read-Host "Repository name"
 
-    # Auto-detect Python
-    Write-Host ""
-    Write-Info "Detecting Python installation..."
-    try {
-        $pythonCmd = Get-Command python -ErrorAction Stop
-        $pythonPath = $pythonCmd.Source
-        Write-Success "Found Python at: $pythonPath"
-        $usePython = Read-Host "Use this Python? (Y/N)"
-        if ($usePython -ne 'Y' -and $usePython -ne 'y') {
-            $pythonPath = Read-Host "Enter Python executable path"
-        }
-    }
-    catch {
-        Write-Warning "Python not found in PATH"
-        $pythonPath = Read-Host "Enter Python executable path"
-    }
-
-    # Set script path (relative to plugin directory)
-    $scriptPath = Join-Path $ScriptDir "fetch_pr_comments.py"
-    Write-Info "Script path: $scriptPath"
-
-    # Prompt for PAT token
-    Write-Host ""
-    Write-Host "Azure DevOps Personal Access Token (PAT)" -ForegroundColor Yellow
-    Write-Info "Create a token at: https://dev.azure.com/$organization/_usersSettings/tokens"
-    Write-Info "Required scope: Code (Read)"
-    Write-Host ""
-    $token = Read-Host "Enter your PAT token" -AsSecureString
-    $tokenPlainText = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
-        [Runtime.InteropServices.Marshal]::SecureStringToBSTR($token))
-
-    # Create configuration object
+    # Create minimal configuration (paths are auto-detected)
     $configTemplate = @{
         comment = "Azure DevOps Configuration for PR Comment Fetcher"
         organization = $organization
         project = $project
         repository = $repository
-        scriptPath = $scriptPath
-        pythonPath = $pythonPath
-        token = $tokenPlainText
         debugMode = $false
         autoFormatForClaudeCode = $true
     }
@@ -375,6 +385,10 @@ function New-ConfigFile {
     $configJson | Out-File -FilePath $ConfigFile -Encoding UTF8
 
     Write-Success "Created configuration file: $ConfigFile"
+    Write-Host ""
+    Write-Info "Token configuration:"
+    Write-Host "  Set environment variable: `$env:AZURE_DEVOPS_PAT = 'your-token'" -ForegroundColor Blue
+    Write-Host "  Or run: python scripts/token_manager.py --save" -ForegroundColor Blue
     Write-Host ""
 }
 
@@ -457,7 +471,9 @@ function Start-Installation {
         New-CommandsDirectory
         Test-ExistingInstallation
         Install-Command
-        New-ConfigFile
+
+        # Run setup wizard instead of manual config
+        Invoke-SetupWizard
 
         if (Test-Installation) {
             Write-NextSteps

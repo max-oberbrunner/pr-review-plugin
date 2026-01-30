@@ -5,3 +5,7 @@ requests>=2.31.0
 
 # Load environment variables from .env file
 python-dotenv>=1.0.0
+
+# Secure token storage (optional but recommended)
+# Provides system keychain integration (macOS Keychain, Windows Credential Manager)
+keyring>=24.0.0

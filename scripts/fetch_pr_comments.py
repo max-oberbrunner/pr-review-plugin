@@ -30,14 +30,24 @@ except ImportError:
 # Load environment variables from .env file
 load_dotenv()
 
-# Import status tracker
+# Import status tracker and error messages
+script_dir = Path(__file__).parent
+sys.path.insert(0, str(script_dir))
+
 try:
     from status_tracker import create_status_tracker, CommentStatus
 except ImportError:
-    # Try to import from the same directory
-    script_dir = Path(__file__).parent
-    sys.path.insert(0, str(script_dir))
-    from status_tracker import create_status_tracker, CommentStatus
+    print("Error: status_tracker module not found", file=sys.stderr)
+    sys.exit(1)
+
+try:
+    from error_messages import (
+        auth_error, pr_not_found_error, forbidden_error,
+        timeout_error, connection_error, http_error
+    )
+    ERROR_MESSAGES_AVAILABLE = True
+except ImportError:
+    ERROR_MESSAGES_AVAILABLE = False
 
 
 class ADOCommentFetcher:
@@ -87,15 +97,38 @@ class ADOCommentFetcher:
 
             return data.get("value", [])
         except requests.exceptions.HTTPError as e:
-            if e.response.status_code == 401:
-                print(f"Error: Authentication failed. Check your PAT token.", file=sys.stderr)
-            elif e.response.status_code == 404:
-                print(f"Error: PR #{pr_id} not found in repo '{self.repo}'", file=sys.stderr)
+            if ERROR_MESSAGES_AVAILABLE:
+                error_msg = http_error(
+                    e.response.status_code,
+                    e.response.text,
+                    org=self.org,
+                    project=self.project,
+                    repo=self.repo,
+                    pr_id=pr_id
+                )
+                print(error_msg, file=sys.stderr)
             else:
-                print(f"Error: HTTP {e.response.status_code} - {e.response.text}", file=sys.stderr)
+                # Fallback to simple error messages
+                if e.response.status_code == 401:
+                    print(f"Error: Authentication failed. Check your PAT token.", file=sys.stderr)
+                elif e.response.status_code == 404:
+                    print(f"Error: PR #{pr_id} not found in repo '{self.repo}'", file=sys.stderr)
+                elif e.response.status_code == 403:
+                    print(f"Error: Access denied. Check your PAT token permissions.", file=sys.stderr)
+                else:
+                    print(f"Error: HTTP {e.response.status_code} - {e.response.text}", file=sys.stderr)
+            sys.exit(1)
+        except requests.exceptions.Timeout:
+            if ERROR_MESSAGES_AVAILABLE:
+                print(timeout_error(60), file=sys.stderr)
+            else:
+                print(f"Error: Request timed out after 60 seconds", file=sys.stderr)
             sys.exit(1)
         except requests.exceptions.RequestException as e:
-            print(f"Error: Failed to connect to Azure DevOps: {e}", file=sys.stderr)
+            if ERROR_MESSAGES_AVAILABLE:
+                print(connection_error(str(e)), file=sys.stderr)
+            else:
+                print(f"Error: Failed to connect to Azure DevOps: {e}", file=sys.stderr)
             sys.exit(1)
 
     def fetch_pr_info(self, pr_id: int) -> Dict:
@@ -347,14 +380,21 @@ Examples:
 
     # Load and merge status tracking if not in JSON mode
     if not args.json:
-        # Determine working directory (where status file lives)
+        # Determine working directory (legacy fallback for status file)
         working_dir = Path(args.output).parent if args.output else Path.cwd()
 
-        # Load status tracker
-        status_tracker = create_status_tracker(args.pr, working_dir)
+        # Load status tracker with centralized storage (org/project/repo)
+        status_tracker = create_status_tracker(
+            args.pr,
+            working_dir=working_dir,
+            org=args.org,
+            project=args.project,
+            repo=args.repo
+        )
         if status_tracker.statuses:
             if not args.debug:
-                print(f"[INFO] Loaded {len(status_tracker.statuses)} tracked statuses", file=sys.stderr)
+                status_location = "centralized" if status_tracker.use_centralized else "local"
+                print(f"[INFO] Loaded {len(status_tracker.statuses)} tracked statuses ({status_location})", file=sys.stderr)
 
         # Merge status info with threads
         threads = status_tracker.merge_with_threads(threads)
