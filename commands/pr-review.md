@@ -71,12 +71,15 @@ Before fetching comments, verify the project is configured:
    ```
    This project hasn't been configured for PR Review yet.
    
-   Run the setup wizard from your project directory:
-     python /path/to/pr-review-plugin/scripts/setup_wizard.py
+   Run the appropriate setup wizard from your project directory:
    
-   This will prompt for:
-   - Azure DevOps organization, project, and repository
-   - PAT token (saved to system keychain)
+   # For GitHub:
+   python /path/to/pr-review-plugin/scripts/setup_github.py
+   
+   # For Azure DevOps:
+   python /path/to/pr-review-plugin/scripts/setup_ado.py
+   
+   The wizard will prompt for repository details and PAT token (saved to system keychain).
    ```
 
 3. Wait for user to complete setup, then proceed to Step 1

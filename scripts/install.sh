@@ -237,12 +237,8 @@ verify_installation() {
 
 # Run setup wizard
 run_setup_wizard() {
-    local wizard_script="$SCRIPT_DIR/setup_wizard.py"
-
-    if [[ ! -f "$wizard_script" ]]; then
-        print_warning "Setup wizard not found: $wizard_script"
-        return 1
-    fi
+    local github_wizard="$SCRIPT_DIR/setup_github.py"
+    local ado_wizard="$SCRIPT_DIR/setup_ado.py"
 
     # Detect Python
     local python_cmd=""
@@ -258,20 +254,45 @@ run_setup_wizard() {
     fi
 
     echo ""
-    print_info "Would you like to run the setup wizard to configure Azure DevOps?"
-    read -p "Run setup wizard? (y/n) " -n 1 -r
+    print_info "Would you like to run a setup wizard now?"
+    echo ""
+    echo "  1) GitHub"
+    echo "  2) Azure DevOps"
+    echo "  3) Skip (configure later)"
+    echo ""
+    read -p "Select platform (1/2/3): " -n 1 -r
     echo
 
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        print_info "Starting setup wizard..."
-        echo ""
-        "$python_cmd" "$wizard_script"
-        return $?
-    else
-        print_info "Skipping setup wizard. You can run it later with:"
-        echo -e "   ${BLUE}python $wizard_script${NC}"
-        return 0
-    fi
+    case $REPLY in
+        1)
+            if [[ ! -f "$github_wizard" ]]; then
+                print_warning "GitHub setup wizard not found: $github_wizard"
+                return 1
+            fi
+            print_info "Starting GitHub setup wizard..."
+            echo ""
+            "$python_cmd" "$github_wizard"
+            return $?
+            ;;
+        2)
+            if [[ ! -f "$ado_wizard" ]]; then
+                print_warning "Azure DevOps setup wizard not found: $ado_wizard"
+                return 1
+            fi
+            print_info "Starting Azure DevOps setup wizard..."
+            echo ""
+            "$python_cmd" "$ado_wizard"
+            return $?
+            ;;
+        *)
+            print_info "Skipping setup wizard. You can run it later with:"
+            echo -e "   ${BLUE}# For GitHub:${NC}"
+            echo -e "   ${BLUE}python $github_wizard${NC}"
+            echo -e "   ${BLUE}# For Azure DevOps:${NC}"
+            echo -e "   ${BLUE}python $ado_wizard${NC}"
+            return 0
+            ;;
+    esac
 }
 
 # Print next steps

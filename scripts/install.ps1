@@ -298,14 +298,8 @@ function Install-Command {
 function Invoke-SetupWizard {
     Write-Info "Setting up configuration..."
 
-    $wizardScript = Join-Path $ScriptDir "setup_wizard.py"
-
-    if (-not (Test-Path $wizardScript)) {
-        Write-Warning "Setup wizard not found: $wizardScript"
-        Write-Info "Falling back to manual configuration..."
-        New-ConfigFileManual
-        return
-    }
+    $githubWizard = Join-Path $ScriptDir "setup_github.py"
+    $adoWizard = Join-Path $ScriptDir "setup_ado.py"
 
     # Detect Python
     $pythonCmd = $null
@@ -325,16 +319,42 @@ function Invoke-SetupWizard {
     }
 
     Write-Host ""
-    $response = Read-Host "Would you like to run the setup wizard to configure Azure DevOps? (Y/N)"
+    Write-Host "Would you like to run a setup wizard now?" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  1) GitHub"
+    Write-Host "  2) Azure DevOps"
+    Write-Host "  3) Skip (configure later)"
+    Write-Host ""
+    $response = Read-Host "Select platform (1/2/3)"
 
-    if ($response -eq 'Y' -or $response -eq 'y') {
-        Write-Info "Starting setup wizard..."
-        Write-Host ""
-        & $pythonCmd $wizardScript
-    }
-    else {
-        Write-Info "Skipping setup wizard. You can run it later with:"
-        Write-Host "   python $wizardScript" -ForegroundColor Blue
+    switch ($response) {
+        '1' {
+            if (-not (Test-Path $githubWizard)) {
+                Write-Warning "GitHub setup wizard not found: $githubWizard"
+                New-ConfigFileManual
+                return
+            }
+            Write-Info "Starting GitHub setup wizard..."
+            Write-Host ""
+            & $pythonCmd $githubWizard
+        }
+        '2' {
+            if (-not (Test-Path $adoWizard)) {
+                Write-Warning "Azure DevOps setup wizard not found: $adoWizard"
+                New-ConfigFileManual
+                return
+            }
+            Write-Info "Starting Azure DevOps setup wizard..."
+            Write-Host ""
+            & $pythonCmd $adoWizard
+        }
+        default {
+            Write-Info "Skipping setup wizard. You can run it later with:"
+            Write-Host "   # For GitHub:" -ForegroundColor Blue
+            Write-Host "   python $githubWizard" -ForegroundColor Blue
+            Write-Host "   # For Azure DevOps:" -ForegroundColor Blue
+            Write-Host "   python $adoWizard" -ForegroundColor Blue
+        }
     }
 }
 
@@ -345,7 +365,10 @@ function New-ConfigFileManual {
     Write-Host "Configuration is stored per-project in .claude/pr-review.json" -ForegroundColor Yellow
     Write-Host ""
     Write-Host "To configure, navigate to your project and run:" -ForegroundColor Cyan
-    Write-Host "   python $ScriptDir\setup_wizard.py" -ForegroundColor Blue
+    Write-Host "   # For GitHub:" -ForegroundColor Blue
+    Write-Host "   python $ScriptDir\setup_github.py" -ForegroundColor Blue
+    Write-Host "   # For Azure DevOps:" -ForegroundColor Blue
+    Write-Host "   python $ScriptDir\setup_ado.py" -ForegroundColor Blue
     Write-Host ""
     Write-Host "Or manually create .claude/pr-review.json in your project root:" -ForegroundColor Cyan
     Write-Host @"
@@ -396,9 +419,12 @@ function Write-NextSteps {
     Write-Host ""
     Write-Host "Next steps:"
     Write-Host ""
-    Write-Host "1. Navigate to your project and run the setup wizard:" -ForegroundColor Yellow
+    Write-Host "1. Navigate to your project and run the appropriate setup wizard:" -ForegroundColor Yellow
     Write-Host "   cd your-project" -ForegroundColor Blue
-    Write-Host "   python $ScriptDir\setup_wizard.py" -ForegroundColor Blue
+    Write-Host "   # For GitHub:" -ForegroundColor Blue
+    Write-Host "   python $ScriptDir\setup_github.py" -ForegroundColor Blue
+    Write-Host "   # For Azure DevOps:" -ForegroundColor Blue
+    Write-Host "   python $ScriptDir\setup_ado.py" -ForegroundColor Blue
     Write-Host "   (Creates .claude/pr-review.json in your project)"
     Write-Host ""
     Write-Host "2. Set up Python environment (if not already done):"

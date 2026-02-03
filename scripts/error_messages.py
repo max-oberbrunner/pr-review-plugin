@@ -295,8 +295,12 @@ def config_missing_error(project_root=None) -> str:
    - Environment variable: export AZURE_DEVOPS_PAT='your-token'
    - System keychain: python scripts/token_manager.py --save
 
-4. Or run the setup wizard from within your project:
-   python scripts/setup_wizard.py"""
+4. Or run the appropriate setup wizard from within your project:
+   # For GitHub:
+   python scripts/setup_github.py
+   
+   # For Azure DevOps:
+   python scripts/setup_ado.py"""
 
     return format_error(
         ErrorCode.CONFIG_MISSING,
