@@ -1,4 +1,4 @@
-﻿# PR Review Plugin - Windows Installation Script
+# PR Review Plugin - Windows Installation Script
 # Automatically installs the PR review command to Claude Code
 
 #Requires -Version 5.1
@@ -20,8 +20,6 @@ $InformationPreference = "Continue"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PluginDir = Split-Path -Parent $ScriptDir
 $CommandFile = Join-Path $PluginDir "commands\pr-review.md"
-$ConfigDir = "$env:USERPROFILE\.claude"
-$ConfigFile = Join-Path $ConfigDir "ado-config.json"
 
 # Color helper functions
 function Write-Success {
@@ -341,50 +339,22 @@ function Invoke-SetupWizard {
 }
 
 function New-ConfigFileManual {
-    # Legacy manual config creation (fallback if wizard unavailable)
-    Write-Info "Manual configuration setup..."
-
-    # Create .claude directory if it doesn't exist
-    if (-not (Test-Path $ConfigDir)) {
-        New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null
-        Write-Success "Created directory: $ConfigDir"
-    }
-
-    # Check if config already exists
-    if (Test-Path $ConfigFile) {
-        Write-Warning "Configuration file already exists: $ConfigFile"
-        $response = Read-Host "Overwrite? (Y/N)"
-
-        if ($response -ne 'Y' -and $response -ne 'y') {
-            Write-Info "Keeping existing configuration"
-            return
-        }
-    }
-
+    # Manual config creation instructions (fallback if wizard unavailable)
+    Write-Info "Manual configuration required..."
     Write-Host ""
-    Write-Host "Azure DevOps Configuration" -ForegroundColor Cyan
-    Write-Host "═══════════════════════════" -ForegroundColor Cyan
+    Write-Host "Configuration is stored per-project in .claude/pr-review.json" -ForegroundColor Yellow
     Write-Host ""
-
-    # Prompt for configuration values
-    $organization = Read-Host "Azure DevOps Organization (e.g., 'contoso')"
-    $project = Read-Host "Project name"
-    $repository = Read-Host "Repository name"
-
-    # Create minimal configuration (paths are auto-detected)
-    $configTemplate = @{
-        comment = "Azure DevOps Configuration for PR Comment Fetcher"
-        organization = $organization
-        project = $project
-        repository = $repository
-        debugMode = $false
-        autoFormatForClaudeCode = $true
-    }
-
-    $configJson = $configTemplate | ConvertTo-Json
-    $configJson | Out-File -FilePath $ConfigFile -Encoding UTF8
-
-    Write-Success "Created configuration file: $ConfigFile"
+    Write-Host "To configure, navigate to your project and run:" -ForegroundColor Cyan
+    Write-Host "   python $ScriptDir\setup_wizard.py" -ForegroundColor Blue
+    Write-Host ""
+    Write-Host "Or manually create .claude/pr-review.json in your project root:" -ForegroundColor Cyan
+    Write-Host @"
+   {
+     "organization": "your-org",
+     "project": "your-project",
+     "repository": "your-repo"
+   }
+"@ -ForegroundColor Gray
     Write-Host ""
     Write-Info "Token configuration:"
     Write-Host "  Set environment variable: `$env:AZURE_DEVOPS_PAT = 'your-token'" -ForegroundColor Blue
@@ -426,10 +396,10 @@ function Write-NextSteps {
     Write-Host ""
     Write-Host "Next steps:"
     Write-Host ""
-    Write-Host "1. Configure Azure DevOps settings:" -ForegroundColor Yellow
-    Write-Host "   Edit: " -NoNewline
-    Write-Host "$ConfigFile" -ForegroundColor Blue
-    Write-Host "   Required: organization, project, repository, scriptPath, pythonPath"
+    Write-Host "1. Navigate to your project and run the setup wizard:" -ForegroundColor Yellow
+    Write-Host "   cd your-project" -ForegroundColor Blue
+    Write-Host "   python $ScriptDir\setup_wizard.py" -ForegroundColor Blue
+    Write-Host "   (Creates .claude/pr-review.json in your project)"
     Write-Host ""
     Write-Host "2. Set up Python environment (if not already done):"
     Write-Host "   cd $PluginDir\scripts" -ForegroundColor Blue

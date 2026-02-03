@@ -249,7 +249,7 @@ Environment Variables:
 Resolution Order:
   1. Environment variable (AZURE_DEVOPS_PAT)
   2. System keychain (macOS Keychain / Windows Credential Manager)
-  3. Config file (~/.claude/ado-config.json) - DEPRECATED
+  3. Config file (.claude/pr-review.json in project root) - DEPRECATED
   4. Interactive prompt
         """
     )
@@ -326,28 +326,45 @@ Resolution Order:
         else:
             print("[  --  ] System keychain (keyring not installed)")
 
-        # Check config file
+        # Check config file (in project root)
         from pathlib import Path
-        config_path = Path.home() / ".claude" / "ado-config.json"
-        if config_path.exists():
-            try:
-                import json
-                with open(config_path, 'r', encoding='utf-8-sig') as f:
-                    config = json.load(f)
-                config_token = config.get('token')
-                if config_token and len(config_token) >= 20 and config_token not in [
-                    'YOUR_AZURE_DEVOPS_PAT_HERE', 'PLACEHOLDER_TOKEN_NEEDS_TO_BE_SET'
-                ]:
-                    status = "[ACTIVE]" if not env_token and not (KEYRING_AVAILABLE and keychain_token) else "[BACKUP]"
-                    print(f"{status} Config file (DEPRECATED)")
-                    print(f"         Path: {config_path}")
-                    print(f"         Token: {config_token[:4]}...{config_token[-4:]}")
-                else:
-                    print(f"[  --  ] Config file (placeholder or invalid)")
-            except Exception:
-                print(f"[ERROR ] Config file (failed to read)")
+
+        # Find project root by searching for .git folder
+        def find_project_root():
+            current = Path.cwd()
+            while current != current.parent:
+                if (current / ".git").exists():
+                    return current
+                current = current.parent
+            if (current / ".git").exists():
+                return current
+            return None
+
+        project_root = find_project_root()
+        if project_root:
+            config_path = project_root / ".claude" / "pr-review.json"
+            if config_path.exists():
+                try:
+                    import json
+                    with open(config_path, 'r', encoding='utf-8-sig') as f:
+                        config = json.load(f)
+                    config_token = config.get('token')
+                    keychain_token_val = keychain_token if KEYRING_AVAILABLE else None
+                    if config_token and len(config_token) >= 20 and config_token not in [
+                        'YOUR_AZURE_DEVOPS_PAT_HERE', 'PLACEHOLDER_TOKEN_NEEDS_TO_BE_SET'
+                    ]:
+                        status = "[ACTIVE]" if not env_token and not keychain_token_val else "[BACKUP]"
+                        print(f"{status} Config file (DEPRECATED)")
+                        print(f"         Path: {config_path}")
+                        print(f"         Token: {config_token[:4]}...{config_token[-4:]}")
+                    else:
+                        print(f"[  --  ] Config file (placeholder or invalid)")
+                except Exception:
+                    print(f"[ERROR ] Config file (failed to read)")
+            else:
+                print(f"[  --  ] Config file (not found at {config_path})")
         else:
-            print(f"[  --  ] Config file (not found)")
+            print(f"[  --  ] Config file (not in a git repository)")
 
         print("")
         print("Resolution order: env > keychain > config > prompt")

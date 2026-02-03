@@ -31,6 +31,22 @@ except ImportError:
         return None
 
 
+def find_project_root() -> Optional[Path]:
+    """Find the project root by searching upward for a .git folder."""
+    current = Path.cwd()
+
+    while current != current.parent:
+        if (current / ".git").exists():
+            return current
+        current = current.parent
+
+    # Check root directory as well
+    if (current / ".git").exists():
+        return current
+
+    return None
+
+
 # ANSI color codes (work on most terminals)
 class Colors:
     GREEN = '\033[92m'
@@ -274,20 +290,29 @@ def get_yes_no(prompt: str, default: bool = True) -> bool:
         sys.exit(1)
 
 
-def create_config_file(org: str, project: str, repo: str) -> Path:
+def create_config_file(org: str, project: str, repo: str, project_root: Optional[Path] = None) -> Tuple[Path, Path]:
     """
-    Create the configuration file.
+    Create the configuration file in the project's .claude folder.
 
     Args:
         org: Azure DevOps organization
         project: Project name
         repo: Repository name
+        project_root: Optional project root path (auto-detected if not provided)
 
     Returns:
-        Path to created config file
+        Tuple of (config_file path, project_root path)
     """
-    config_dir = Path.home() / ".claude"
-    config_file = config_dir / "ado-config.json"
+    # Find project root if not provided
+    if not project_root:
+        project_root = find_project_root()
+
+    if not project_root:
+        print_error("Not in a git repository. Please run this command from within a git project.")
+        sys.exit(1)
+
+    config_dir = project_root / ".claude"
+    config_file = config_dir / "pr-review.json"
 
     # Create directory if needed
     config_dir.mkdir(parents=True, exist_ok=True)
@@ -297,11 +322,11 @@ def create_config_file(org: str, project: str, repo: str) -> Path:
         print_warning(f"Configuration file already exists: {config_file}")
         if not get_yes_no("Overwrite?", default=False):
             print_info("Keeping existing configuration")
-            return config_file
+            return config_file, project_root
 
     # Create minimal config (paths are auto-detected)
     config = {
-        "comment": "Azure DevOps Configuration for PR Comment Fetcher",
+        "comment": "Azure DevOps PR Review Configuration",
         "organization": org,
         "project": project,
         "repository": repo,
@@ -312,7 +337,7 @@ def create_config_file(org: str, project: str, repo: str) -> Path:
     with open(config_file, 'w', encoding='utf-8') as f:
         json.dump(config, f, indent=2)
 
-    return config_file
+    return config_file, project_root
 
 
 def run_wizard():
@@ -430,7 +455,7 @@ def run_wizard():
 
     # Step 5: Create config file
     print_header("Step 5: Configuration File")
-    config_file = create_config_file(org, project, repo)
+    config_file, project_root = create_config_file(org, project, repo)
     print_success(f"Configuration saved to: {config_file}")
 
     # Summary
@@ -439,6 +464,7 @@ def run_wizard():
     print(f"  Organization: {org}")
     print(f"  Project: {project}")
     print(f"  Repository: {repo}")
+    print(f"  Project root: {project_root}")
     print(f"  Config file: {config_file}")
     print("")
 
@@ -493,7 +519,14 @@ Run without arguments for interactive mode.
         # Check mode - show current configuration
         print_header("Configuration Check")
 
-        config_file = Path.home() / ".claude" / "ado-config.json"
+        project_root = find_project_root()
+        if not project_root:
+            print_error("Not in a git repository")
+            sys.exit(1)
+
+        print_info(f"Project root: {project_root}")
+
+        config_file = project_root / ".claude" / "pr-review.json"
         if config_file.exists():
             print_success(f"Config file: {config_file}")
             try:
@@ -505,7 +538,7 @@ Run without arguments for interactive mode.
             except Exception as e:
                 print_error(f"Failed to read config: {e}")
         else:
-            print_error("Config file not found")
+            print_error(f"Config file not found at {config_file}")
 
         # Check token
         print("")
@@ -535,7 +568,7 @@ Run without arguments for interactive mode.
             sys.exit(1)
 
         print_info(f"Creating config for {args.org}/{args.project}/{args.repo}")
-        config_file = create_config_file(args.org, args.project, args.repo)
+        config_file, project_root = create_config_file(args.org, args.project, args.repo)
         print_success(f"Configuration saved to: {config_file}")
 
     else:

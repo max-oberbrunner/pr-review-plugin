@@ -17,18 +17,48 @@ Example: `/pr-review 87663`
 
 ## Configuration
 
-Reads from `~/.claude/ado-config.json`:
+Reads from `.claude/pr-review.json` in the project root (auto-detected via .git folder):
 ```json
 {
-  "organization": "cudirect",
-  "project": "Origence",
-  "repository": "arcOS.Web",
-  "scriptPath": "/Users/maxoberbrunner/ado-pr/pr-comments-fetch.py",
-  "pythonPath": "/Users/maxoberbrunner/ado-pr/venv/bin/python"
+  "organization": "your-org",
+  "project": "your-project",
+  "repository": "your-repo"
 }
 ```
 
+Paths (scriptPath, pythonPath) are auto-detected.
+
+### Token Resolution
+
+The script resolves tokens automatically in this order:
+1. Environment variable (`AZURE_DEVOPS_PAT`)
+2. System keychain (macOS Keychain / Windows Credential Manager)
+3. Config file (deprecated, shows warning)
+4. Interactive prompt - user enters token in terminal, offered to save to keychain
+
+If the user is prompted for a token, they enter it directly in the terminal. This is handled by the Python script, not by Claude.
+
 ## Workflow
+
+### Step 0: Prerequisites Check
+
+Before fetching comments, verify the project is configured:
+
+1. Check if `.claude/pr-review.json` exists in the project root (detected via .git folder)
+2. If the script outputs `[CONFIG_MISSING]`, inform user:
+
+   ```
+   This project hasn't been configured for PR Review yet.
+   
+   Run the setup wizard from your project directory:
+     python /path/to/pr-review-plugin/scripts/setup_wizard.py
+   
+   This will prompt for:
+   - Azure DevOps organization, project, and repository
+   - PAT token (saved to system keychain)
+   ```
+
+3. Wait for user to complete setup, then proceed to Step 1
 
 ### Step 1: Fetch Comments
 
@@ -165,29 +195,47 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 
 ## Error Handling
 
-If script fails, troubleshoot:
+When the script fails, parse the error output and respond appropriately:
 
-1. **Check config exists:**
-   ```bash
-   cat ~/.claude/ado-config.json
-   ```
+### `[CONFIG_MISSING]`
+Project not configured. Guide user to run the setup wizard:
+```bash
+python /path/to/pr-review-plugin/scripts/setup_wizard.py
+```
 
-2. **Test script directly:**
-   ```bash
-   source /Users/maxoberbrunner/ado-pr/venv/bin/activate
-   python /Users/maxoberbrunner/ado-pr/pr-comments-fetch.py \
-     --org cudirect --project Origence --repo arcOS.Web --pr 87663
-   ```
+### `[AUTH_FAILED]` or HTTP 401
+Token invalid or expired. Tell user:
+- Create new PAT at: `https://dev.azure.com/{org}/_usersSettings/tokens`
+- Required scope: **Code (Read)**
+- Save with: `python scripts/token_manager.py --save`
 
-3. **Verify token:**
-   ```bash
-   python /Users/maxoberbrunner/ado-pr/test_connection.py
-   ```
+### `[PR_NOT_FOUND]` or HTTP 404
+PR doesn't exist or config is wrong. Ask user to verify:
+- PR number is correct
+- Organization/project/repository in `.claude/pr-review.json` match the PR's location
 
-4. **Check venv:**
-   ```bash
-   ls /Users/maxoberbrunner/ado-pr/venv/bin/python
-   ```
+### `[FORBIDDEN]` or HTTP 403
+Token lacks permissions. User needs to create a new token with **Code (Read)** scope.
+
+### `[TIMEOUT]` or `[CONNECTION_ERROR]`
+Network issue. Ask user if they want to:
+- Retry the request
+- Check Azure DevOps status: https://status.dev.azure.com/
+
+### General Troubleshooting
+
+If the error is unclear, suggest these diagnostic commands:
+```bash
+# Check config
+cat .claude/pr-review.json
+
+# Check token status
+python scripts/token_manager.py --status
+
+# Test script directly
+python scripts/fetch_pr_comments.py \
+  --org your-org --project your-project --repo your-repo --pr 12345
+```
 
 ## Key Principles
 

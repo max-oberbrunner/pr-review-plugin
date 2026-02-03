@@ -75,7 +75,6 @@ The plugin will:
 ```
 pr-review-plugin/
 ├── .claude/
-│   ├── example-ado-config.json
 │   └── settings.local.json
 ├── commands/
 │   └── pr-review.md
@@ -95,41 +94,54 @@ pr-review-plugin/
 └── README.md
 ```
 
+When configured in your project, the plugin creates:
+```
+your-project/
+├── .claude/
+│   ├── pr-review.json      # Configuration (per-project)
+│   └── pr-status/          # PR review status tracking
+│       └── pr-{N}-status.json
+└── ...
+```
+
 ## Configuration
 
-Configuration is stored at `~/.claude/ado-config.json`:
+Configuration is stored per-project at `.claude/pr-review.json` (in the project root):
 
 ```json
 {
   "organization": "your-org",
   "project": "your-project",
-  "repository": "your-repo",
-  "scriptPath": "/path/to/fetch_pr_comments.py",
-  "pythonPath": "/path/to/python",
-  "token": "your-azure-devops-pat",
-  "debugMode": false
+  "repository": "your-repo"
 }
 ```
 
-**Status tracking** is stored in `.pr-status/pr-{NUMBER}-status.json` with values: `ACTIVE`, `COMPLETED`, `IN_PROGRESS`, `SKIPPED`, `BLOCKED`.
+Paths (scriptPath, pythonPath) are auto-detected. Token is resolved from:
+1. Environment variable (`AZURE_DEVOPS_PAT`)
+2. System keychain
+3. Config file (deprecated)
+
+**Status tracking** is stored in `.claude/pr-status/pr-{NUMBER}-status.json` with values: `ACTIVE`, `COMPLETED`, `IN_PROGRESS`, `SKIPPED`, `BLOCKED`.
 
 ## Troubleshooting
 
 ### Authentication Issues
 
-**"No token provided"** - Verify `~/.claude/ado-config.json` has a valid `token` field.
+**"No token provided"** - Set `AZURE_DEVOPS_PAT` environment variable or run `python scripts/token_manager.py --save`.
 
 **"Authentication failed (401)"** - Your PAT may have expired or lacks **Code (Read)** scope. Create a new token at `https://dev.azure.com/{org}/_usersSettings/tokens`.
 
 ### Python Issues
 
-**"Python not found"** - Install Python 3.8+ and update `pythonPath` in the config file.
+**"Python not found"** - Install Python 3.8+. Paths are auto-detected.
 
 **"ModuleNotFoundError: requests"** - Run `pip install -r scripts/requirements.txt`.
 
 ### Configuration Issues
 
-**"Script not found"** - Ensure `scriptPath` in config uses an absolute path to `fetch_pr_comments.py`.
+**"Not in a git repository"** - Run the command from within a git repository.
+
+**"Configuration file not found"** - Run `python scripts/setup_wizard.py` from your project directory.
 
 **"PR not found (404)"** - Verify the PR number and that you have access to the repository.
 

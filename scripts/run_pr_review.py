@@ -23,7 +23,8 @@ try:
 except ImportError:
     # Fallback if token_manager not available
     KEYRING_AVAILABLE = False
-    def resolve_token(config=None, prompt_if_missing=True):
+
+    def resolve_token(config=None, prompt_if_missing=True):  # pyright: ignore[reportRedeclaration]
         token = os.getenv('AZURE_DEVOPS_PAT')
         if token:
             return (token, 'env')
@@ -32,14 +33,20 @@ except ImportError:
         return (None, 'none')
 
 try:
-    from error_messages import config_missing_error, token_invalid_error, path_not_found_error
+    from error_messages import config_missing_error, not_a_git_repo_error, token_invalid_error, path_not_found_error
 except ImportError:
     # Fallback if error_messages not available
-    def config_missing_error():
-        return "ERROR: Configuration file not found at ~/.claude/ado-config.json"
-    def token_invalid_error(reason):
+    def config_missing_error(project_root=None):  # pyright: ignore[reportRedeclaration]
+        path = f"{project_root}/.claude/pr-review.json" if project_root else ".claude/pr-review.json"
+        return f"ERROR: Configuration file not found at {path}"
+
+    def not_a_git_repo_error():  # pyright: ignore[reportRedeclaration]
+        return "ERROR: Not in a git repository. Please run this command from within a git project."
+
+    def token_invalid_error(reason):  # pyright: ignore[reportRedeclaration]
         return f"ERROR: Invalid token - {reason}"
-    def path_not_found_error(path_type, path):
+
+    def path_not_found_error(path_type, path):  # pyright: ignore[reportRedeclaration]
         return f"ERROR: {path_type} not found at: {path}"
 
 
@@ -62,16 +69,35 @@ def find_python_path():
     return None
 
 
-def find_config_file():
-    """Locate the ado-config.json file."""
-    # Try home directory first
-    home = Path.home()
-    config_path = home / ".claude" / "ado-config.json"
+def find_project_root():
+    """Find the project root by searching upward for a .git folder."""
+    current = Path.cwd()
 
-    if config_path.exists():
-        return config_path
+    while current != current.parent:
+        if (current / ".git").exists():
+            return current
+        current = current.parent
+
+    # Check root directory as well
+    if (current / ".git").exists():
+        return current
 
     return None
+
+
+def find_config_file():
+    """Locate the pr-review.json file in the project's .claude folder."""
+    project_root = find_project_root()
+
+    if not project_root:
+        return None, None
+
+    config_path = project_root / ".claude" / "pr-review.json"
+
+    if config_path.exists():
+        return config_path, project_root
+
+    return None, project_root
 
 
 def load_config(config_path):
@@ -175,7 +201,7 @@ def main():
     )
     parser.add_argument('pr_number', type=int, help='Pull request number')
     parser.add_argument('--output', '-o', help='Output file path (default: pr-{NUMBER}-comments.md in current directory)')
-    parser.add_argument('--config', help='Path to config file (default: ~/.claude/ado-config.json)')
+    parser.add_argument('--config', help='Path to config file (default: .claude/pr-review.json in project root)')
     parser.add_argument('--token', help='Override token (or use AZURE_DEVOPS_PAT env var)')
 
     args = parser.parse_args()
@@ -183,11 +209,23 @@ def main():
     # Find config file
     if args.config:
         config_path = Path(args.config)
+        # When config is explicitly provided, try to find git root but don't require it
+        project_root = find_project_root()
+        if not project_root:
+            # Fallback: derive project root from config path
+            if config_path.name == 'pr-review.json' and config_path.parent.name == '.claude':
+                project_root = config_path.parent.parent
+            else:
+                project_root = config_path.parent
     else:
-        config_path = find_config_file()
+        config_path, project_root = find_config_file()
+        # Check if we're in a git repository (only required when auto-discovering config)
+        if not project_root:
+            print(not_a_git_repo_error(), file=sys.stderr)
+            sys.exit(1)
 
     if not config_path or not config_path.exists():
-        print(config_missing_error(), file=sys.stderr)
+        print(config_missing_error(project_root), file=sys.stderr)
         sys.exit(1)
 
     print(f"[INFO] Loading configuration from {config_path}", file=sys.stderr)

@@ -17,6 +17,7 @@ class ErrorCode:
     TIMEOUT = "TIMEOUT"
     CONNECTION_ERROR = "CONNECTION_ERROR"
     CONFIG_MISSING = "CONFIG_MISSING"
+    NOT_A_GIT_REPO = "NOT_A_GIT_REPO"
     TOKEN_INVALID = "TOKEN_INVALID"
     PATH_NOT_FOUND = "PATH_NOT_FOUND"
 
@@ -91,7 +92,7 @@ def auth_error(org: Optional[str] = None, http_status: int = 401) -> str:
 2. Check token resolution order:
    - Environment variable: export AZURE_DEVOPS_PAT='your-token'
    - System keychain: python scripts/token_manager.py --status
-   - Config file: ~/.claude/ado-config.json
+   - Config file: .claude/pr-review.json (in project root)
 
 3. Create a new PAT token if needed:
    {token_url}
@@ -131,7 +132,7 @@ def pr_not_found_error(org: str, project: str, repo: str, pr_id: int) -> str:
     fix = f"""1. Verify the PR exists:
    {pr_url}
 
-2. Check your configuration values in ~/.claude/ado-config.json:
+2. Check your configuration values in .claude/pr-review.json (in project root):
    - organization: "{org}"
    - project: "{project}"
    - repository: "{repo}"
@@ -267,29 +268,53 @@ def connection_error(error_message: str = "") -> str:
     )
 
 
-def config_missing_error() -> str:
+def config_missing_error(project_root=None) -> str:
     """Generate config file missing error message."""
-    fix = """1. Create the configuration file:
-   ~/.claude/ado-config.json
+    config_path = f"{project_root}/.claude/pr-review.json" if project_root else ".claude/pr-review.json"
+
+    fix = f"""1. Create the configuration file in your project root:
+   {config_path}
 
 2. Minimal configuration (paths are auto-detected):
-   {
+   {{
      "organization": "your-org",
      "project": "your-project",
      "repository": "your-repo"
-   }
+   }}
 
 3. Set your token using one of these methods:
    - Environment variable: export AZURE_DEVOPS_PAT='your-token'
    - System keychain: python scripts/token_manager.py --save
 
-4. Or run the setup wizard:
+4. Or run the setup wizard from within your project:
    python scripts/setup_wizard.py"""
 
     return format_error(
         ErrorCode.CONFIG_MISSING,
         "Configuration file not found",
-        "The configuration file ~/.claude/ado-config.json does not exist.",
+        f"The configuration file {config_path} does not exist.",
+        fix
+    )
+
+
+def not_a_git_repo_error() -> str:
+    """Generate not in a git repository error message."""
+    fix = """1. Navigate to your project directory:
+   cd /path/to/your/project
+
+2. Ensure you're in a git repository:
+   git status
+
+3. If this is a new project, initialize git:
+   git init
+
+4. The PR Review plugin requires a git repository to store
+   configuration files in the project's .claude folder."""
+
+    return format_error(
+        ErrorCode.NOT_A_GIT_REPO,
+        "Not in a git repository",
+        "This command must be run from within a git repository. The plugin looks for a .git folder to determine the project root.",
         fix
     )
 

@@ -7,7 +7,6 @@ preserving user progress (COMPLETED, IN_PROGRESS, SKIPPED, BLOCKED).
 """
 
 import json
-import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -26,107 +25,63 @@ class CommentStatus:
         return [cls.ACTIVE, cls.COMPLETED, cls.IN_PROGRESS, cls.SKIPPED, cls.BLOCKED]
 
 
-def get_centralized_status_dir(org: str, project: str, repo: str) -> Path:
+def find_project_root() -> Optional[Path]:
+    """Find the project root by searching upward for a .git folder."""
+    current = Path.cwd()
+
+    while current != current.parent:
+        if (current / ".git").exists():
+            return current
+        current = current.parent
+
+    # Check root directory as well
+    if (current / ".git").exists():
+        return current
+
+    return None
+
+
+def get_status_dir(project_root: Optional[Path] = None) -> Path:
     """
-    Get centralized status directory path.
+    Get status directory path in the project's .claude folder.
 
     Args:
-        org: Azure DevOps organization
-        project: Project name
-        repo: Repository name
+        project_root: Project root path (auto-detected if not provided)
 
     Returns:
-        Path to centralized status directory
+        Path to status directory
     """
-    return Path.home() / ".claude" / "pr-review-status" / org / project / repo
+    if not project_root:
+        project_root = find_project_root()
 
+    if not project_root:
+        # Fallback to current directory if not in a git repo
+        project_root = Path.cwd()
 
-def get_legacy_status_file(pr_number: int, working_dir: Optional[Path] = None) -> Path:
-    """
-    Get legacy status file path for migration purposes.
-
-    Args:
-        pr_number: Pull request number
-        working_dir: Legacy working directory
-
-    Returns:
-        Path to legacy status file
-    """
-    base_dir = working_dir or Path.cwd()
-    return base_dir / ".pr-status" / f"pr-{pr_number}-status.json"
+    return project_root / ".claude" / "pr-status"
 
 
 class StatusTracker:
     """Manages persistent status tracking for PR comments."""
 
-    def __init__(self, pr_number: int, working_dir: Optional[Path] = None,
-                 org: Optional[str] = None, project: Optional[str] = None, repo: Optional[str] = None):
+    def __init__(self, pr_number: int, project_root: Optional[Path] = None):
         """
         Initialize status tracker.
 
         Args:
             pr_number: The pull request number
-            working_dir: Directory where status file should be stored (legacy fallback)
-            org: Azure DevOps organization (for centralized storage)
-            project: Project name (for centralized storage)
-            repo: Repository name (for centralized storage)
+            project_root: Project root path (auto-detected if not provided)
         """
         self.pr_number = pr_number
-        self.org = org
-        self.project = project
-        self.repo = repo
-        self.working_dir = working_dir or Path.cwd()
+        self.project_root = project_root or find_project_root() or Path.cwd()
         self.statuses = {}
 
-        # Determine status file location
-        if org and project and repo:
-            # Centralized location: ~/.claude/pr-review-status/{org}/{project}/{repo}/
-            self.status_dir = get_centralized_status_dir(org, project, repo)
-            self.use_centralized = True
-        else:
-            # Legacy fallback: .pr-status/ in working directory
-            self.status_dir = self.working_dir / ".pr-status"
-            self.use_centralized = False
+        # Status files stored in project's .claude/pr-status/ folder
+        self.status_dir = get_status_dir(self.project_root)
 
         # Ensure directory exists
         self.status_dir.mkdir(parents=True, exist_ok=True)
         self.status_file = self.status_dir / f"pr-{pr_number}-status.json"
-
-        # Check for legacy file and migrate if needed
-        if self.use_centralized:
-            self._migrate_legacy_status()
-
-    def _migrate_legacy_status(self) -> bool:
-        """
-        Migrate status from legacy location to centralized location.
-
-        Returns:
-            True if migration occurred, False otherwise
-        """
-        if not self.use_centralized:
-            return False
-
-        # Check multiple potential legacy locations
-        legacy_locations = [
-            get_legacy_status_file(self.pr_number, self.working_dir),
-            get_legacy_status_file(self.pr_number, Path.cwd()),
-        ]
-
-        for legacy_file in legacy_locations:
-            if legacy_file.exists() and not self.status_file.exists():
-                try:
-                    # Copy legacy file to new location
-                    shutil.copy2(legacy_file, self.status_file)
-                    print(f"[INFO] Migrated status file from {legacy_file} to {self.status_file}")
-
-                    # Optionally delete the old file (keep for safety)
-                    # legacy_file.unlink()
-
-                    return True
-                except Exception as e:
-                    print(f"Warning: Failed to migrate legacy status file: {e}")
-
-        return False
 
     def load(self) -> bool:
         """
@@ -277,62 +232,42 @@ class StatusTracker:
         return False
 
 
-def create_status_tracker(pr_number: int, working_dir: Optional[Path] = None,
-                          org: Optional[str] = None, project: Optional[str] = None,
-                          repo: Optional[str] = None) -> StatusTracker:
+def create_status_tracker(pr_number: int, project_root: Optional[Path] = None) -> StatusTracker:
     """
     Factory function to create and initialize a status tracker.
 
     Args:
         pr_number: The pull request number
-        working_dir: Directory where status file should be stored (legacy fallback)
-        org: Azure DevOps organization (for centralized storage)
-        project: Project name (for centralized storage)
-        repo: Repository name (for centralized storage)
+        project_root: Project root path (auto-detected if not provided)
 
     Returns:
         Initialized StatusTracker instance with data loaded if available
 
     Example:
-        # Centralized storage (recommended)
-        tracker = create_status_tracker(123, org='myorg', project='myproject', repo='myrepo')
-
-        # Legacy storage (backwards compatible)
-        tracker = create_status_tracker(123, working_dir=Path('/some/dir'))
+        tracker = create_status_tracker(123)
+        tracker = create_status_tracker(123, project_root=Path('/path/to/project'))
     """
-    tracker = StatusTracker(pr_number, working_dir, org=org, project=project, repo=repo)
+    tracker = StatusTracker(pr_number, project_root)
     tracker.load()  # Load existing data if available
     return tracker
 
 
-def get_status_file_info(pr_number: int, org: Optional[str] = None,
-                         project: Optional[str] = None, repo: Optional[str] = None,
-                         working_dir: Optional[Path] = None) -> Dict[str, any]:
+def get_status_file_info(pr_number: int, project_root: Optional[Path] = None) -> Dict[str, Path | bool]:
     """
     Get information about status file location.
 
     Args:
         pr_number: Pull request number
-        org: Azure DevOps organization
-        project: Project name
-        repo: Repository name
-        working_dir: Legacy working directory
+        project_root: Project root path (auto-detected if not provided)
 
     Returns:
-        Dict with 'path', 'exists', 'is_centralized' keys
+        Dict with 'path', 'exists', 'directory' keys
     """
-    if org and project and repo:
-        status_dir = get_centralized_status_dir(org, project, repo)
-        is_centralized = True
-    else:
-        status_dir = (working_dir or Path.cwd()) / ".pr-status"
-        is_centralized = False
-
+    status_dir = get_status_dir(project_root)
     status_file = status_dir / f"pr-{pr_number}-status.json"
 
     return {
         'path': status_file,
         'exists': status_file.exists(),
-        'is_centralized': is_centralized,
         'directory': status_dir
     }
