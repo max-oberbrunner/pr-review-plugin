@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 """
-PR Review Plugin Setup Wizard
+GitHub Setup Wizard for PR Review Plugin
 
-Interactive setup wizard for configuring the PR Review Plugin.
-Provides a unified cross-platform setup experience.
+Interactive setup wizard for configuring the PR Review Plugin with GitHub.
+For Azure DevOps setup, use setup_ado.py instead.
 """
 
 import json
 import os
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 from typing import Optional, Tuple
@@ -20,14 +18,14 @@ sys.path.insert(0, str(script_dir))
 
 try:
     from token_manager import (
-        save_token_to_keychain, get_token_from_keychain,
-        KEYRING_AVAILABLE, KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT
+        save_github_token_to_keychain, get_github_token_from_keychain,
+        KEYRING_AVAILABLE, KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT_GITHUB
     )
 except ImportError:
     KEYRING_AVAILABLE = False
-    def save_token_to_keychain(token):
+    def save_github_token_to_keychain(token):
         return False
-    def get_token_from_keychain():
+    def get_github_token_from_keychain():
         return None
 
 
@@ -101,55 +99,6 @@ def print_info(text: str):
     print(f"{Colors.BLUE}ℹ{Colors.END} {text}")
 
 
-def detect_python() -> Tuple[Optional[str], str]:
-    """
-    Auto-detect Python interpreter.
-
-    Returns:
-        Tuple of (path, version_string)
-    """
-    # Try current Python interpreter
-    python_path = sys.executable
-    if python_path:
-        try:
-            result = subprocess.run(
-                [python_path, '--version'],
-                capture_output=True, text=True, timeout=5
-            )
-            version = result.stdout.strip() or result.stderr.strip()
-            return (python_path, version)
-        except Exception:
-            pass
-
-    # Try python3 in PATH
-    python_cmd = shutil.which('python3')
-    if python_cmd:
-        try:
-            result = subprocess.run(
-                [python_cmd, '--version'],
-                capture_output=True, text=True, timeout=5
-            )
-            version = result.stdout.strip() or result.stderr.strip()
-            return (python_cmd, version)
-        except Exception:
-            pass
-
-    # Try python in PATH
-    python_cmd = shutil.which('python')
-    if python_cmd:
-        try:
-            result = subprocess.run(
-                [python_cmd, '--version'],
-                capture_output=True, text=True, timeout=5
-            )
-            version = result.stdout.strip() or result.stderr.strip()
-            return (python_cmd, version)
-        except Exception:
-            pass
-
-    return (None, "Not found")
-
-
 def check_dependencies() -> bool:
     """
     Check if required Python packages are installed.
@@ -164,11 +113,6 @@ def check_dependencies() -> bool:
     except ImportError:
         missing.append('requests')
 
-    try:
-        from dotenv import load_dotenv
-    except ImportError:
-        missing.append('python-dotenv')
-
     if missing:
         print_warning(f"Missing dependencies: {', '.join(missing)}")
         print_info(f"Install with: pip install {' '.join(missing)}")
@@ -177,43 +121,43 @@ def check_dependencies() -> bool:
     return True
 
 
-def test_token(org: str, token: str) -> bool:
+def test_github_token(owner: str, token: str) -> bool:
     """
-    Test if the PAT token is valid.
+    Test if the GitHub PAT token is valid.
 
     Args:
-        org: Azure DevOps organization
+        owner: Repository owner to test access
         token: PAT token
 
     Returns:
         True if token is valid
     """
-    import base64
-
     try:
         import requests
     except ImportError:
         print_warning("Cannot test token - requests library not installed")
         return True  # Assume valid
 
-    credentials = f":{token}"
-    auth_header = base64.b64encode(credentials.encode()).decode()
-
-    url = f"https://dev.azure.com/{org}/_apis/projects?api-version=7.1"
+    url = "https://api.github.com/user"
     headers = {
-        "Authorization": f"Basic {auth_header}",
-        "Content-Type": "application/json"
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github.v3+json"
     }
 
     try:
         response = requests.get(url, headers=headers, timeout=10)
         if response.status_code == 200:
+            user_data = response.json()
+            print_info(f"Authenticated as: {user_data.get('login', 'unknown')}")
             return True
         elif response.status_code == 401:
             print_error("Token authentication failed")
             return False
         elif response.status_code == 403:
-            print_error("Token lacks permissions")
+            if 'rate limit' in response.text.lower():
+                print_error("Rate limit exceeded")
+            else:
+                print_error("Token lacks permissions")
             return False
         else:
             print_warning(f"Unexpected response: {response.status_code}")
@@ -290,13 +234,12 @@ def get_yes_no(prompt: str, default: bool = True) -> bool:
         sys.exit(1)
 
 
-def create_config_file(org: str, project: str, repo: str, project_root: Optional[Path] = None) -> Tuple[Path, Path]:
+def create_config_file(owner: str, repo: str, project_root: Optional[Path] = None) -> Tuple[Path, Path]:
     """
     Create the configuration file in the project's .claude folder.
 
     Args:
-        org: Azure DevOps organization
-        project: Project name
+        owner: Repository owner (user or organization)
         repo: Repository name
         project_root: Optional project root path (auto-detected if not provided)
 
@@ -324,14 +267,12 @@ def create_config_file(org: str, project: str, repo: str, project_root: Optional
             print_info("Keeping existing configuration")
             return config_file, project_root
 
-    # Create minimal config (paths are auto-detected)
+    # Create config for GitHub
     config = {
-        "comment": "Azure DevOps PR Review Configuration",
-        "organization": org,
-        "project": project,
-        "repository": repo,
-        "debugMode": False,
-        "autoFormatForClaudeCode": True
+        "comment": "GitHub PR Review Configuration",
+        "platform": "github",
+        "owner": owner,
+        "repository": repo
     }
 
     with open(config_file, 'w', encoding='utf-8') as f:
@@ -341,84 +282,56 @@ def create_config_file(org: str, project: str, repo: str, project_root: Optional
 
 
 def run_wizard():
-    """Run the interactive setup wizard."""
-    print_header("PR Review Plugin - Setup Wizard")
+    """Run the interactive setup wizard for GitHub."""
+    print_header("PR Review Plugin - GitHub Setup")
 
-    print("This wizard will help you configure the PR Review Plugin.")
+    print("This wizard will help you configure the PR Review Plugin for GitHub.")
     print("Press Ctrl+C at any time to cancel.\n")
 
-    # Step 1: Detect Python
-    print_header("Step 1: Python Detection")
-    python_path, python_version = detect_python()
-
-    if python_path:
-        print_success(f"Found Python: {python_version}")
-        print_info(f"Path: {python_path}")
-    else:
-        print_error("Python not found!")
-        print_info("Please install Python 3.8+ and try again.")
-        sys.exit(1)
-
-    # Step 2: Check dependencies
-    print_header("Step 2: Dependencies")
+    # Step 1: Check dependencies
+    print_header("Step 1: Dependencies")
     if check_dependencies():
         print_success("All dependencies installed")
     else:
         print("")
-        if get_yes_no("Install missing dependencies now?"):
-            requirements_file = script_dir / "requirements.txt"
-            if requirements_file.exists():
-                print_info("Installing dependencies...")
-                result = subprocess.run(
-                    [python_path, '-m', 'pip', 'install', '-r', str(requirements_file)],
-                    capture_output=True, text=True
-                )
-                if result.returncode == 0:
-                    print_success("Dependencies installed")
-                else:
-                    print_error("Failed to install dependencies")
-                    print(result.stderr)
-            else:
-                print_error(f"requirements.txt not found at {requirements_file}")
+        print_info("Please install missing dependencies and run again.")
+        sys.exit(1)
 
-    # Step 3: Azure DevOps configuration
-    print_header("Step 3: Azure DevOps Configuration")
-    print("Enter your Azure DevOps details:\n")
+    # Step 2: GitHub configuration
+    print_header("Step 2: GitHub Repository Configuration")
+    print("Enter your GitHub repository details:\n")
 
-    org = get_input("Organization name (e.g., 'contoso')")
-    while not org:
-        print_error("Organization is required")
-        org = get_input("Organization name")
-
-    project = get_input("Project name")
-    while not project:
-        print_error("Project is required")
-        project = get_input("Project name")
+    owner = get_input("Repository owner (username or organization)")
+    while not owner:
+        print_error("Owner is required")
+        owner = get_input("Repository owner")
 
     repo = get_input("Repository name")
     while not repo:
         print_error("Repository is required")
         repo = get_input("Repository name")
 
-    # Step 4: Token configuration
-    print_header("Step 4: Authentication Token (PAT)")
-    print(f"Create a PAT at: https://dev.azure.com/{org}/_usersSettings/tokens")
-    print("Required permission: Code (Read)\n")
+    # Step 3: Token configuration
+    print_header("Step 3: Authentication Token (PAT)")
+    print("Create a PAT at: https://github.com/settings/tokens")
+    print("Required scopes:")
+    print("  - repo (for private repositories)")
+    print("  - public_repo (for public repositories only)\n")
 
     # Check for existing token
     existing_token = None
     token_source = None
 
     # Check environment variable
-    env_token = os.getenv('AZURE_DEVOPS_PAT')
+    env_token = os.getenv('GITHUB_PAT')
     if env_token and len(env_token) >= 20:
-        print_success("Found token in environment variable (AZURE_DEVOPS_PAT)")
+        print_success("Found token in environment variable (GITHUB_PAT)")
         existing_token = env_token
         token_source = 'env'
 
     # Check keychain
     if not existing_token and KEYRING_AVAILABLE:
-        keychain_token = get_token_from_keychain()
+        keychain_token = get_github_token_from_keychain()
         if keychain_token:
             print_success("Found token in system keychain")
             existing_token = keychain_token
@@ -428,18 +341,18 @@ def run_wizard():
         if get_yes_no(f"Use existing token from {token_source}?"):
             token = existing_token
         else:
-            token = get_secure_input("Enter new PAT token (input hidden)")
+            token = get_secure_input("Enter new GitHub PAT token (input hidden)")
     else:
-        token = get_secure_input("Enter your PAT token (input hidden)")
+        token = get_secure_input("Enter your GitHub PAT token (input hidden)")
 
-    while not token or len(token) < 20:
-        print_error("Token is required and must be at least 20 characters")
-        token = get_secure_input("Enter your PAT token (input hidden)")
+    while not token or len(token) < 10:
+        print_error("Token is required and must be at least 10 characters")
+        token = get_secure_input("Enter your GitHub PAT token (input hidden)")
 
     # Test token
     print("")
     print_info("Testing token...")
-    if test_token(org, token):
+    if test_github_token(owner, token):
         print_success("Token is valid!")
     else:
         print_warning("Could not verify token. Continuing anyway...")
@@ -448,39 +361,42 @@ def run_wizard():
     if KEYRING_AVAILABLE and token_source != 'keychain':
         print("")
         if get_yes_no("Save token to system keychain for future use?"):
-            if save_token_to_keychain(token):
+            if save_github_token_to_keychain(token):
                 print_success("Token saved to system keychain")
             else:
                 print_error("Failed to save token to keychain")
 
-    # Step 5: Create config file
-    print_header("Step 5: Configuration File")
-    config_file, project_root = create_config_file(org, project, repo)
+    # Step 4: Create config file
+    print_header("Step 4: Configuration File")
+    config_file, project_root = create_config_file(owner, repo)
     print_success(f"Configuration saved to: {config_file}")
 
     # Summary
     print_header("Setup Complete!")
     print("Your configuration:")
-    print(f"  Organization: {org}")
-    print(f"  Project: {project}")
+    print(f"  Platform: GitHub")
+    print(f"  Owner: {owner}")
     print(f"  Repository: {repo}")
     print(f"  Project root: {project_root}")
     print(f"  Config file: {config_file}")
     print("")
 
     if token_source == 'env':
-        print_info("Token: Using environment variable (AZURE_DEVOPS_PAT)")
+        print_info("Token: Using environment variable (GITHUB_PAT)")
     elif KEYRING_AVAILABLE:
         print_info("Token: Stored in system keychain")
     else:
-        print_warning("Token: Not stored (set AZURE_DEVOPS_PAT or install keyring)")
+        print_warning("Token: Not stored (set GITHUB_PAT or install keyring)")
         print_info("  pip install keyring")
-        print_info("  python scripts/token_manager.py --save")
+        print_info("  python scripts/token_manager.py --save --platform github")
 
     print("")
     print("Next steps:")
     print(f"  1. Start Claude Code: {Colors.BLUE}claude{Colors.END}")
-    print(f"  2. Run the command: {Colors.BLUE}/pr-review 12345{Colors.END}")
+    print(f"  2. Run the command: {Colors.BLUE}/pr-review 123{Colors.END}")
+    print("")
+    print_warning("Note: GitHub comment fetching is not yet implemented.")
+    print_info("PR information will be displayed, but comments are coming soon.")
     print("")
 
 
@@ -489,17 +405,16 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="PR Review Plugin Setup Wizard",
+        description="GitHub Setup Wizard for PR Review Plugin",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-This wizard helps you configure the PR Review Plugin interactively.
+This wizard helps you configure the PR Review Plugin for GitHub.
 
 It will:
-  1. Detect your Python installation
-  2. Check/install required dependencies
-  3. Prompt for Azure DevOps org/project/repo
-  4. Configure PAT token securely (keychain if available)
-  5. Create the configuration file
+  1. Check required dependencies
+  2. Prompt for GitHub owner/repository
+  3. Configure PAT token securely (keychain if available)
+  4. Create the configuration file
 
 Run without arguments for interactive mode.
         """
@@ -509,8 +424,7 @@ Run without arguments for interactive mode.
                         help='Check current configuration without making changes')
     parser.add_argument('--non-interactive', action='store_true',
                         help='Run without prompts (requires all options)')
-    parser.add_argument('--org', help='Azure DevOps organization (non-interactive)')
-    parser.add_argument('--project', help='Project name (non-interactive)')
+    parser.add_argument('--owner', help='Repository owner (non-interactive)')
     parser.add_argument('--repo', help='Repository name (non-interactive)')
 
     args = parser.parse_args()
@@ -532,9 +446,13 @@ Run without arguments for interactive mode.
             try:
                 with open(config_file, 'r') as f:
                     config = json.load(f)
-                print(f"  Organization: {config.get('organization', 'Not set')}")
-                print(f"  Project: {config.get('project', 'Not set')}")
-                print(f"  Repository: {config.get('repository', 'Not set')}")
+                platform = config.get('platform', 'unknown')
+                print(f"  Platform: {platform}")
+                if platform == 'github':
+                    print(f"  Owner: {config.get('owner', 'Not set')}")
+                    print(f"  Repository: {config.get('repository', 'Not set')}")
+                else:
+                    print_warning("This config is not for GitHub")
             except Exception as e:
                 print_error(f"Failed to read config: {e}")
         else:
@@ -542,11 +460,11 @@ Run without arguments for interactive mode.
 
         # Check token
         print("")
-        env_token = os.getenv('AZURE_DEVOPS_PAT')
+        env_token = os.getenv('GITHUB_PAT')
         if env_token:
-            print_success("Token: Found in environment variable")
+            print_success("Token: Found in environment variable (GITHUB_PAT)")
         elif KEYRING_AVAILABLE:
-            keychain_token = get_token_from_keychain()
+            keychain_token = get_github_token_from_keychain()
             if keychain_token:
                 print_success("Token: Found in system keychain")
             else:
@@ -563,12 +481,12 @@ Run without arguments for interactive mode.
 
     elif args.non_interactive:
         # Non-interactive mode
-        if not all([args.org, args.project, args.repo]):
-            print_error("Non-interactive mode requires --org, --project, and --repo")
+        if not all([args.owner, args.repo]):
+            print_error("Non-interactive mode requires --owner and --repo")
             sys.exit(1)
 
-        print_info(f"Creating config for {args.org}/{args.project}/{args.repo}")
-        config_file, project_root = create_config_file(args.org, args.project, args.repo)
+        print_info(f"Creating config for {args.owner}/{args.repo}")
+        config_file, project_root = create_config_file(args.owner, args.repo)
         print_success(f"Configuration saved to: {config_file}")
 
     else:

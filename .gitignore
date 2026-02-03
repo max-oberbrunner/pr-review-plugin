@@ -44,6 +44,7 @@ node_modules/
 package-lock.json
 yarn.lock
 
+scripts/__pycache__/
 # Build Output
 dist/
 build/

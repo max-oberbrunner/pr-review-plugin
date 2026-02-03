@@ -1,11 +1,11 @@
 ---
 name: pr-review
-description: Interactive Azure DevOps PR review workflow - fetches comments and guides through fixes
+description: Interactive PR review workflow for Azure DevOps and GitHub - fetches comments and guides through fixes
 ---
 
 # PR Review Skill
 
-Interactive workflow for addressing Azure DevOps pull request comments.
+Interactive workflow for addressing pull request comments from Azure DevOps or GitHub.
 
 ## Usage
 
@@ -17,9 +17,21 @@ Example: `/pr-review 87663`
 
 ## Configuration
 
-Reads from `.claude/pr-review.json` in the project root (auto-detected via .git folder):
+Reads from `.claude/pr-review.json` in the project root (auto-detected via .git folder).
+
+### GitHub Configuration
 ```json
 {
+  "platform": "github",
+  "owner": "your-username-or-org",
+  "repository": "your-repo"
+}
+```
+
+### Azure DevOps Configuration
+```json
+{
+  "platform": "azure-devops",
   "organization": "your-org",
   "project": "your-project",
   "repository": "your-repo"
@@ -30,13 +42,22 @@ Paths (scriptPath, pythonPath) are auto-detected.
 
 ### Token Resolution
 
-The script resolves tokens automatically in this order:
+The script resolves tokens automatically based on platform:
+
+**Azure DevOps:**
 1. Environment variable (`AZURE_DEVOPS_PAT`)
 2. System keychain (macOS Keychain / Windows Credential Manager)
 3. Config file (deprecated, shows warning)
-4. Interactive prompt - user enters token in terminal, offered to save to keychain
+4. Interactive prompt
+
+**GitHub:**
+1. Environment variable (`GITHUB_PAT`)
+2. System keychain
+3. Interactive prompt
 
 If the user is prompted for a token, they enter it directly in the terminal. This is handled by the Python script, not by Claude.
+
+> **Note:** GitHub comment fetching is not yet implemented. PR information will be displayed, but comments are coming soon.
 
 ## Workflow
 
@@ -197,10 +218,14 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 
 When the script fails, parse the error output and respond appropriately:
 
-### `[CONFIG_MISSING]`
-Project not configured. Guide user to run the setup wizard:
+### `[CONFIG_MISSING]` or `[PLATFORM_MISSING]`
+Project not configured. Guide user to run the appropriate setup wizard:
 ```bash
-python /path/to/pr-review-plugin/scripts/setup_wizard.py
+# For GitHub:
+python /path/to/pr-review-plugin/scripts/setup_github.py
+
+# For Azure DevOps:
+python /path/to/pr-review-plugin/scripts/setup_ado.py
 ```
 
 ### `[AUTH_FAILED]` or HTTP 401

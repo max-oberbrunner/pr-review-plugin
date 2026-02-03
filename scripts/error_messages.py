@@ -11,6 +11,7 @@ from typing import Optional
 
 class ErrorCode:
     """Error code constants."""
+    # General errors
     AUTH_FAILED = "AUTH_FAILED"
     PR_NOT_FOUND = "PR_NOT_FOUND"
     FORBIDDEN = "FORBIDDEN"
@@ -20,6 +21,14 @@ class ErrorCode:
     NOT_A_GIT_REPO = "NOT_A_GIT_REPO"
     TOKEN_INVALID = "TOKEN_INVALID"
     PATH_NOT_FOUND = "PATH_NOT_FOUND"
+    PLATFORM_MISSING = "PLATFORM_MISSING"
+
+    # GitHub-specific errors
+    GITHUB_AUTH_FAILED = "GITHUB_AUTH_FAILED"
+    GITHUB_PR_NOT_FOUND = "GITHUB_PR_NOT_FOUND"
+    GITHUB_REPO_NOT_FOUND = "GITHUB_REPO_NOT_FOUND"
+    GITHUB_RATE_LIMITED = "GITHUB_RATE_LIMITED"
+    GITHUB_FORBIDDEN = "GITHUB_FORBIDDEN"
 
 
 def get_token_creation_url(org: Optional[str] = None) -> str:
@@ -428,3 +437,277 @@ def http_error(status_code: int, response_text: str = "", org: Optional[str] = N
             f"Azure DevOps returned an unexpected error. Response: {response_text[:200] if response_text else 'No details'}",
             f"Check Azure DevOps status at {get_azure_status_url()} and try again."
         )
+
+
+# =============================================================================
+# GitHub-specific error messages
+# =============================================================================
+
+def get_github_token_creation_url() -> str:
+    """Get GitHub PAT creation URL."""
+    return "https://github.com/settings/tokens"
+
+
+def get_github_status_url() -> str:
+    """Get GitHub status page URL."""
+    return "https://www.githubstatus.com/"
+
+
+def get_github_pr_url(owner: str, repo: str, pr_number: int) -> str:
+    """Get GitHub PR URL."""
+    return f"https://github.com/{owner}/{repo}/pull/{pr_number}"
+
+
+def github_auth_error() -> str:
+    """
+    Generate GitHub authentication error message (401).
+
+    Returns:
+        Formatted error message
+    """
+    token_url = get_github_token_creation_url()
+
+    fix = f"""1. Verify your GitHub PAT token is correct and not expired
+
+2. Check token resolution order:
+   - Environment variable: export GITHUB_PAT='your-token'
+   - System keychain: python scripts/token_manager.py --status
+
+3. Create a new PAT token if needed:
+   {token_url}
+
+   Required permissions:
+   - repo (for private repositories)
+   - public_repo (for public repositories only)
+
+4. Test your token:
+   curl -H "Authorization: Bearer YOUR_TOKEN" https://api.github.com/user
+
+5. If using keychain, update the stored token:
+   python scripts/token_manager.py --save --platform github"""
+
+    return format_error(
+        ErrorCode.GITHUB_AUTH_FAILED,
+        "GitHub authentication failed",
+        "GitHub returned HTTP 401. Your PAT token may be invalid, expired, or missing required permissions.",
+        fix
+    )
+
+
+def github_pr_not_found_error(owner: str, repo: str, pr_number: int) -> str:
+    """
+    Generate GitHub PR not found error message (404).
+
+    Args:
+        owner: Repository owner (user or org)
+        repo: Repository name
+        pr_number: Pull request number
+
+    Returns:
+        Formatted error message
+    """
+    pr_url = get_github_pr_url(owner, repo, pr_number)
+
+    fix = f"""1. Verify the PR exists:
+   {pr_url}
+
+2. Check your configuration values in .claude/pr-review.json:
+   - owner: "{owner}"
+   - repository: "{repo}"
+
+3. Verify the PR number is correct: #{pr_number}
+
+4. Note: Repository names are case-sensitive.
+   Try the exact name from GitHub.
+
+5. If the repository is private, ensure your token has 'repo' scope."""
+
+    return format_error(
+        ErrorCode.GITHUB_PR_NOT_FOUND,
+        f"PR #{pr_number} not found",
+        f"The pull request was not found in repository '{owner}/{repo}'. This could mean the PR doesn't exist, or the owner/repo configuration is incorrect.",
+        fix
+    )
+
+
+def github_repo_not_found_error(owner: str, repo: str) -> str:
+    """
+    Generate GitHub repository not found error message.
+
+    Args:
+        owner: Repository owner
+        repo: Repository name
+
+    Returns:
+        Formatted error message
+    """
+    fix = f"""1. Verify the repository exists:
+   https://github.com/{owner}/{repo}
+
+2. Check your configuration values in .claude/pr-review.json:
+   - owner: "{owner}"
+   - repository: "{repo}"
+
+3. If the repository is private, ensure:
+   - Your GitHub account has access to the repository
+   - Your PAT token has 'repo' scope
+
+4. Note: Repository names are case-sensitive."""
+
+    return format_error(
+        ErrorCode.GITHUB_REPO_NOT_FOUND,
+        f"Repository not found",
+        f"The repository '{owner}/{repo}' was not found or you don't have access to it.",
+        fix
+    )
+
+
+def github_rate_limited_error(reset_time: Optional[str] = None) -> str:
+    """
+    Generate GitHub rate limit error message (403 with rate limit).
+
+    Args:
+        reset_time: When the rate limit resets (if available)
+
+    Returns:
+        Formatted error message
+    """
+    reset_info = f"\n\nRate limit resets at: {reset_time}" if reset_time else ""
+
+    fix = f"""1. GitHub API rate limit exceeded.{reset_info}
+
+2. For unauthenticated requests: 60 requests/hour
+   For authenticated requests: 5,000 requests/hour
+
+3. Ensure you're using a PAT token:
+   - Environment variable: export GITHUB_PAT='your-token'
+   - System keychain: python scripts/token_manager.py --save --platform github
+
+4. Wait for the rate limit to reset, or use a different token.
+
+5. Check your current rate limit:
+   curl -H "Authorization: Bearer YOUR_TOKEN" https://api.github.com/rate_limit"""
+
+    return format_error(
+        ErrorCode.GITHUB_RATE_LIMITED,
+        "GitHub API rate limit exceeded",
+        "You've exceeded the GitHub API rate limit. This usually happens with unauthenticated requests or heavy API usage.",
+        fix
+    )
+
+
+def github_forbidden_error(owner: Optional[str] = None, repo: Optional[str] = None) -> str:
+    """
+    Generate GitHub forbidden error message (403).
+
+    Args:
+        owner: Repository owner
+        repo: Repository name
+
+    Returns:
+        Formatted error message
+    """
+    token_url = get_github_token_creation_url()
+    repo_info = f" for repository '{owner}/{repo}'" if owner and repo else ""
+
+    fix = f"""1. Your PAT token lacks required permissions{repo_info}.
+
+2. Create a new token with appropriate scopes:
+   {token_url}
+
+   For private repositories: 'repo' scope
+   For public repositories: 'public_repo' scope
+
+3. If this is a private repository, ensure:
+   - Your GitHub account has access to the repository
+   - The PAT is created by an account with repository access
+
+4. Update your token using:
+   - Environment variable: export GITHUB_PAT='new-token'
+   - System keychain: python scripts/token_manager.py --save --platform github"""
+
+    return format_error(
+        ErrorCode.GITHUB_FORBIDDEN,
+        "GitHub access denied",
+        f"Your PAT token is valid but lacks permission to access this resource{repo_info}.",
+        fix
+    )
+
+
+def github_http_error(status_code: int, response_text: str = "",
+                      owner: Optional[str] = None, repo: Optional[str] = None,
+                      pr_number: Optional[int] = None) -> str:
+    """
+    Generate error message for GitHub HTTP errors.
+
+    Routes to specific error handlers based on status code.
+
+    Args:
+        status_code: HTTP status code
+        response_text: Response body text
+        owner: Repository owner
+        repo: Repository name
+        pr_number: Pull request number
+
+    Returns:
+        Formatted error message
+    """
+    if status_code == 401:
+        return github_auth_error()
+    elif status_code == 403:
+        # Check if it's a rate limit error
+        if 'rate limit' in response_text.lower():
+            return github_rate_limited_error()
+        return github_forbidden_error(owner, repo)
+    elif status_code == 404 and owner and repo and pr_number:
+        return github_pr_not_found_error(owner, repo, pr_number)
+    elif status_code == 404 and owner and repo:
+        return github_repo_not_found_error(owner, repo)
+    elif status_code == 404:
+        return format_error(
+            ErrorCode.GITHUB_PR_NOT_FOUND,
+            "Resource not found (404)",
+            f"The requested GitHub resource was not found. Response: {response_text[:200] if response_text else 'No details'}",
+            "Verify your owner, repository, and PR number are correct."
+        )
+    else:
+        return format_error(
+            f"GITHUB_HTTP_{status_code}",
+            f"GitHub HTTP Error {status_code}",
+            f"GitHub returned an unexpected error. Response: {response_text[:200] if response_text else 'No details'}",
+            f"Check GitHub status at {get_github_status_url()} and try again."
+        )
+
+
+def platform_missing_error(project_root=None) -> str:
+    """Generate error message when platform field is missing from config."""
+    config_path = f"{project_root}/.claude/pr-review.json" if project_root else ".claude/pr-review.json"
+
+    fix = f"""1. Add a 'platform' field to your configuration file:
+   {config_path}
+
+2. For GitHub:
+   {{
+     "platform": "github",
+     "owner": "your-username-or-org",
+     "repository": "your-repo"
+   }}
+
+3. For Azure DevOps:
+   {{
+     "platform": "azure-devops",
+     "organization": "your-org",
+     "project": "your-project",
+     "repository": "your-repo"
+   }}
+
+4. Or run the appropriate setup wizard:
+   - For GitHub:      python scripts/setup_github.py
+   - For Azure DevOps: python scripts/setup_ado.py"""
+
+    return format_error(
+        ErrorCode.PLATFORM_MISSING,
+        "Platform not specified in configuration",
+        f"The configuration file {config_path} is missing the required 'platform' field.",
+        fix
+    )

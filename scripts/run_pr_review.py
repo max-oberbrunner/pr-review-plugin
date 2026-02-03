@@ -2,8 +2,8 @@
 """
 PR Review Wrapper Script
 
-Simplifies running the PR comment fetcher by automatically reading
-configuration and handling all the complexity.
+Platform-agnostic wrapper that routes to the appropriate PR fetcher
+(Azure DevOps or GitHub) based on project configuration.
 """
 
 import argparse
@@ -19,7 +19,7 @@ script_dir = Path(__file__).parent
 sys.path.insert(0, str(script_dir))
 
 try:
-    from token_manager import resolve_token, KEYRING_AVAILABLE
+    from token_manager import resolve_token, resolve_github_token, KEYRING_AVAILABLE
 except ImportError:
     # Fallback if token_manager not available
     KEYRING_AVAILABLE = False
@@ -32,8 +32,17 @@ except ImportError:
             return (config.get('token'), 'config')
         return (None, 'none')
 
+    def resolve_github_token(prompt_if_missing=True):  # pyright: ignore[reportRedeclaration]
+        token = os.getenv('GITHUB_PAT')
+        if token:
+            return (token, 'env')
+        return (None, 'none')
+
 try:
-    from error_messages import config_missing_error, not_a_git_repo_error, token_invalid_error, path_not_found_error
+    from error_messages import (
+        config_missing_error, not_a_git_repo_error, token_invalid_error,
+        path_not_found_error, platform_missing_error
+    )
 except ImportError:
     # Fallback if error_messages not available
     def config_missing_error(project_root=None):  # pyright: ignore[reportRedeclaration]
@@ -49,10 +58,20 @@ except ImportError:
     def path_not_found_error(path_type, path):  # pyright: ignore[reportRedeclaration]
         return f"ERROR: {path_type} not found at: {path}"
 
+    def platform_missing_error(project_root=None):  # pyright: ignore[reportRedeclaration]
+        return """ERROR: Missing 'platform' field in configuration.
 
-def find_script_path():
-    """Auto-detect fetch_pr_comments.py relative to this script."""
-    return str(Path(__file__).parent / "fetch_pr_comments.py")
+Please run the appropriate setup wizard:
+  - For GitHub:      python scripts/setup_github.py
+  - For Azure DevOps: python scripts/setup_ado.py"""
+
+
+def find_script_path(platform: str = 'azure-devops'):
+    """Auto-detect the appropriate fetch script relative to this script."""
+    if platform == 'github':
+        return str(Path(__file__).parent / "fetch_github_pr.py")
+    else:
+        return str(Path(__file__).parent / "fetch_pr_comments.py")
 
 
 def find_python_path():
@@ -100,28 +119,43 @@ def find_config_file():
     return None, project_root
 
 
-def load_config(config_path):
-    """Load and validate configuration."""
+def load_config(config_path, project_root=None):
+    """Load and validate configuration for any platform."""
     try:
         # Try utf-8-sig first to handle BOM, fallback to utf-8
         try:
             with open(config_path, 'r', encoding='utf-8-sig') as f:
                 config = json.load(f)
-        except:
+        except UnicodeDecodeError:
             with open(config_path, 'r', encoding='utf-8') as f:
                 config = json.load(f)
 
-        # Only require org, project, repository - paths and token are auto-detected
-        required = ['organization', 'project', 'repository']
+        # Check for platform field (required)
+        platform = config.get('platform')
+        if not platform:
+            print(platform_missing_error(project_root), file=sys.stderr)
+            return None
+
+        # Validate platform value
+        if platform not in ['github', 'azure-devops']:
+            print(f"ERROR: Invalid platform '{platform}'. Must be 'github' or 'azure-devops'", file=sys.stderr)
+            return None
+
+        # Validate required fields based on platform
+        if platform == 'github':
+            required = ['owner', 'repository']
+        else:  # azure-devops
+            required = ['organization', 'project', 'repository']
+
         missing = [field for field in required if field not in config or not config[field]]
 
         if missing:
-            print(f"ERROR: Missing required fields in config: {', '.join(missing)}", file=sys.stderr)
+            print(f"ERROR: Missing required fields for {platform} in config: {', '.join(missing)}", file=sys.stderr)
             return None
 
-        # Auto-fill missing paths
+        # Auto-fill missing paths based on platform
         if not config.get('scriptPath'):
-            config['scriptPath'] = find_script_path()
+            config['scriptPath'] = find_script_path(platform)
             print(f"[INFO] Auto-detected script path: {config['scriptPath']}", file=sys.stderr)
 
         if not config.get('pythonPath'):
@@ -154,8 +188,8 @@ def load_config(config_path):
         return None
 
 
-def run_fetch_script(config, pr_number, output_file, token):
-    """Execute the fetch_pr_comments.py script."""
+def run_ado_fetch_script(config, pr_number, output_file, token):
+    """Execute the Azure DevOps fetch_pr_comments.py script."""
     cmd = [
         config['pythonPath'],
         config['scriptPath'],
@@ -195,14 +229,64 @@ def run_fetch_script(config, pr_number, output_file, token):
         return False
 
 
+def run_github_fetch_script(config, pr_number, output_file, token):
+    """Execute the GitHub fetch_github_pr.py script."""
+    cmd = [
+        config['pythonPath'],
+        config['scriptPath'],
+        '--owner', config['owner'],
+        '--repo', config['repository'],
+        '--pr', str(pr_number),
+        '--token', token,
+        '--output', str(output_file)
+    ]
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+
+        if result.returncode != 0:
+            print(f"ERROR: Script failed with code {result.returncode}", file=sys.stderr)
+            if result.stderr:
+                print(result.stderr, file=sys.stderr)
+            return False
+
+        # Print any output from the script
+        if result.stderr:
+            print(result.stderr, file=sys.stderr)
+
+        return True
+
+    except subprocess.TimeoutExpired:
+        print("ERROR: Script timed out after 60 seconds", file=sys.stderr)
+        return False
+    except Exception as e:
+        print(f"ERROR: Failed to execute script: {e}", file=sys.stderr)
+        return False
+
+
+def run_fetch_script(config, pr_number, output_file, token):
+    """Route to the appropriate fetch script based on platform."""
+    platform = config.get('platform', 'azure-devops')
+
+    if platform == 'github':
+        return run_github_fetch_script(config, pr_number, output_file, token)
+    else:
+        return run_ado_fetch_script(config, pr_number, output_file, token)
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description='PR Review Wrapper - Fetches Azure DevOps PR comments'
+        description='PR Review Wrapper - Fetches PR comments from Azure DevOps or GitHub'
     )
     parser.add_argument('pr_number', type=int, help='Pull request number')
     parser.add_argument('--output', '-o', help='Output file path (default: pr-{NUMBER}-comments.md in current directory)')
     parser.add_argument('--config', help='Path to config file (default: .claude/pr-review.json in project root)')
-    parser.add_argument('--token', help='Override token (or use AZURE_DEVOPS_PAT env var)')
+    parser.add_argument('--token', help='Override token (use AZURE_DEVOPS_PAT or GITHUB_PAT env var based on platform)')
 
     args = parser.parse_args()
 
@@ -229,34 +313,49 @@ def main():
         sys.exit(1)
 
     print(f"[INFO] Loading configuration from {config_path}", file=sys.stderr)
-    config = load_config(config_path)
+    config = load_config(config_path, project_root)
 
     if not config:
         sys.exit(1)
 
+    # Get platform from config
+    platform = config.get('platform', 'azure-devops')
+    print(f"[INFO] Platform: {platform}", file=sys.stderr)
     print("[SUCCESS] Configuration validated", file=sys.stderr)
 
-    # Resolve token using layered approach (env > keychain > config > prompt)
+    # Resolve token using layered approach based on platform
     if args.token:
         # Token provided via command line
         token = args.token
         token_source = 'cli'
     else:
-        # Use token_manager for layered resolution
-        token, token_source = resolve_token(config, prompt_if_missing=True)
+        # Use token_manager for layered resolution based on platform
+        if platform == 'github':
+            token, token_source = resolve_github_token(prompt_if_missing=True)
+        else:
+            token, token_source = resolve_token(config, prompt_if_missing=True)
 
     if not token:
-        print(token_invalid_error("No token found or provided"), file=sys.stderr)
+        env_var = 'GITHUB_PAT' if platform == 'github' else 'AZURE_DEVOPS_PAT'
+        print(token_invalid_error(f"No token found or provided. Set {env_var} or use --token"), file=sys.stderr)
         sys.exit(1)
 
     # Log token source (but not the token itself)
-    source_messages = {
-        'env': 'environment variable (AZURE_DEVOPS_PAT)',
-        'keychain': 'system keychain',
-        'config': 'config file (consider migrating to keychain)',
-        'prompt': 'user input',
-        'cli': 'command line argument'
-    }
+    if platform == 'github':
+        source_messages = {
+            'env': 'environment variable (GITHUB_PAT)',
+            'keychain': 'system keychain',
+            'prompt': 'user input',
+            'cli': 'command line argument'
+        }
+    else:
+        source_messages = {
+            'env': 'environment variable (AZURE_DEVOPS_PAT)',
+            'keychain': 'system keychain',
+            'config': 'config file (consider migrating to keychain)',
+            'prompt': 'user input',
+            'cli': 'command line argument'
+        }
     print(f"[INFO] Using token from: {source_messages.get(token_source, token_source)}", file=sys.stderr)
 
     # Determine output file
@@ -265,13 +364,16 @@ def main():
     else:
         output_file = Path.cwd() / f"pr-{args.pr_number}-comments.md"
 
-    print(f"[INFO] Fetching comments for PR #{args.pr_number}...", file=sys.stderr)
+    if platform == 'github':
+        print(f"[INFO] Fetching PR #{args.pr_number} from GitHub...", file=sys.stderr)
+    else:
+        print(f"[INFO] Fetching comments for PR #{args.pr_number} from Azure DevOps...", file=sys.stderr)
 
-    # Run the fetch script
+    # Run the appropriate fetch script
     success = run_fetch_script(config, args.pr_number, output_file, token)
 
     if success:
-        print(f"[SUCCESS] Comments saved to: {output_file}", file=sys.stderr)
+        print(f"[SUCCESS] Output saved to: {output_file}", file=sys.stderr)
         print(str(output_file))  # Output the file path to stdout for parsing
         sys.exit(0)
     else:
