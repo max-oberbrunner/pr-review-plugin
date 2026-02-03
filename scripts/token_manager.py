@@ -19,7 +19,14 @@ GitHub:
 import os
 import sys
 import getpass
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Callable
+
+# Try to import requests for token validation
+try:
+    import requests
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    REQUESTS_AVAILABLE = False
 
 # Service name for keychain storage
 KEYCHAIN_SERVICE = "pr-review-plugin"
@@ -387,6 +394,246 @@ def resolve_github_token(prompt_if_missing: bool = True) -> Tuple[Optional[str],
             return (token, 'prompt')
 
     return (None, 'none')
+
+
+# =============================================================================
+# Token Validation Functions
+# =============================================================================
+
+def validate_ado_token(token: str, org: str) -> Tuple[bool, str]:
+    """
+    Validate an Azure DevOps token by making a test API call.
+
+    Args:
+        token: The PAT token to validate
+        org: Azure DevOps organization name
+
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    if not REQUESTS_AVAILABLE:
+        # Can't validate without requests, assume valid
+        return (True, "")
+
+    import base64
+    credentials = f":{token}"
+    encoded = base64.b64encode(credentials.encode()).decode()
+
+    headers = {
+        "Authorization": f"Basic {encoded}",
+        "Content-Type": "application/json"
+    }
+
+    try:
+        url = f"https://dev.azure.com/{org}/_apis/projects?api-version=7.1&$top=1"
+        response = requests.get(url, headers=headers, timeout=10)
+
+        if response.status_code == 200:
+            return (True, "")
+        elif response.status_code == 401:
+            return (False, "Authentication failed - token is invalid or expired")
+        elif response.status_code == 403:
+            return (False, "Access denied - token may lack required permissions")
+        else:
+            return (False, f"Unexpected response: HTTP {response.status_code}")
+    except requests.exceptions.Timeout:
+        return (False, "Connection timed out - please check your network")
+    except requests.exceptions.RequestException as e:
+        return (False, f"Connection error: {e}")
+
+
+def validate_github_token(token: str) -> Tuple[bool, str]:
+    """
+    Validate a GitHub token by making a test API call.
+
+    Args:
+        token: The PAT token to validate
+
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    if not REQUESTS_AVAILABLE:
+        # Can't validate without requests, assume valid
+        return (True, "")
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github.v3+json",
+        "X-GitHub-Api-Version": "2022-11-28"
+    }
+
+    try:
+        response = requests.get("https://api.github.com/user", headers=headers, timeout=10)
+
+        if response.status_code == 200:
+            return (True, "")
+        elif response.status_code == 401:
+            return (False, "Authentication failed - token is invalid or expired")
+        elif response.status_code == 403:
+            return (False, "Access denied - token may lack required permissions")
+        else:
+            return (False, f"Unexpected response: HTTP {response.status_code}")
+    except requests.exceptions.Timeout:
+        return (False, "Connection timed out - please check your network")
+    except requests.exceptions.RequestException as e:
+        return (False, f"Connection error: {e}")
+
+
+# =============================================================================
+# Token Renewal Functions (for expired token recovery)
+# =============================================================================
+
+def renew_ado_token(org: str, update_headers_callback: Optional[Callable[[str], None]] = None) -> Optional[str]:
+    """
+    Handle expired Azure DevOps token by prompting user for a new one.
+
+    This function is called when a 401 error is encountered during API calls.
+    It prompts the user for a new token, validates it, and optionally saves to keychain.
+
+    Args:
+        org: Azure DevOps organization name (for validation)
+        update_headers_callback: Optional callback to update request headers with new token
+
+    Returns:
+        New valid token if successful, None if cancelled or failed
+    """
+    print("", file=sys.stderr)
+    print("=" * 60, file=sys.stderr)
+    print("TOKEN EXPIRED OR INVALID", file=sys.stderr)
+    print("=" * 60, file=sys.stderr)
+    print("Your Azure DevOps PAT token has expired or is invalid.", file=sys.stderr)
+    print("", file=sys.stderr)
+    print("To continue, you need to enter a new PAT token.", file=sys.stderr)
+    print("", file=sys.stderr)
+    print(f"Create a new token at: https://dev.azure.com/{org}/_usersSettings/tokens", file=sys.stderr)
+    print("Required scope: Code (Read)", file=sys.stderr)
+    print("", file=sys.stderr)
+
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        try:
+            token = getpass.getpass("Enter your new PAT token (input hidden): ")
+        except (KeyboardInterrupt, EOFError):
+            print("\nCancelled.", file=sys.stderr)
+            return None
+
+        if not token or len(token) < 20:
+            print("Error: Invalid token (too short or empty)", file=sys.stderr)
+            if attempt < max_attempts - 1:
+                print("Please try again.", file=sys.stderr)
+            continue
+
+        # Validate the new token
+        print("Validating token...", file=sys.stderr)
+        is_valid, error_msg = validate_ado_token(token, org)
+
+        if is_valid:
+            print("Token validated successfully!", file=sys.stderr)
+
+            # Offer to save to keychain
+            if KEYRING_AVAILABLE:
+                print("", file=sys.stderr)
+                try:
+                    save_response = input("Save token to system keychain for future use? (y/n): ")
+                    if save_response.lower() in ['y', 'yes']:
+                        if save_token_to_keychain(token):
+                            print("Token saved to keychain successfully.", file=sys.stderr)
+                        else:
+                            print("Failed to save token to keychain.", file=sys.stderr)
+                except (KeyboardInterrupt, EOFError):
+                    pass
+
+            # Call the callback to update headers if provided
+            if update_headers_callback:
+                update_headers_callback(token)
+
+            print("", file=sys.stderr)
+            print("Retrying request with new token...", file=sys.stderr)
+            return token
+        else:
+            print(f"Token validation failed: {error_msg}", file=sys.stderr)
+            if attempt < max_attempts - 1:
+                print(f"Please try again ({max_attempts - attempt - 1} attempts remaining).", file=sys.stderr)
+
+    print("", file=sys.stderr)
+    print("Maximum attempts exceeded. Please verify your token and try again.", file=sys.stderr)
+    return None
+
+
+def renew_github_token(update_headers_callback: Optional[Callable[[str], None]] = None) -> Optional[str]:
+    """
+    Handle expired GitHub token by prompting user for a new one.
+
+    This function is called when a 401 error is encountered during API calls.
+    It prompts the user for a new token, validates it, and optionally saves to keychain.
+
+    Args:
+        update_headers_callback: Optional callback to update request headers with new token
+
+    Returns:
+        New valid token if successful, None if cancelled or failed
+    """
+    print("", file=sys.stderr)
+    print("=" * 60, file=sys.stderr)
+    print("TOKEN EXPIRED OR INVALID", file=sys.stderr)
+    print("=" * 60, file=sys.stderr)
+    print("Your GitHub PAT token has expired or is invalid.", file=sys.stderr)
+    print("", file=sys.stderr)
+    print("To continue, you need to enter a new PAT token.", file=sys.stderr)
+    print("", file=sys.stderr)
+    print("Create a new token at: https://github.com/settings/tokens", file=sys.stderr)
+    print("Required scope: repo (for private repos) or public_repo (for public repos)", file=sys.stderr)
+    print("", file=sys.stderr)
+
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        try:
+            token = getpass.getpass("Enter your new GitHub PAT token (input hidden): ")
+        except (KeyboardInterrupt, EOFError):
+            print("\nCancelled.", file=sys.stderr)
+            return None
+
+        if not token or len(token) < 10:
+            print("Error: Invalid token (too short or empty)", file=sys.stderr)
+            if attempt < max_attempts - 1:
+                print("Please try again.", file=sys.stderr)
+            continue
+
+        # Validate the new token
+        print("Validating token...", file=sys.stderr)
+        is_valid, error_msg = validate_github_token(token)
+
+        if is_valid:
+            print("Token validated successfully!", file=sys.stderr)
+
+            # Offer to save to keychain
+            if KEYRING_AVAILABLE:
+                print("", file=sys.stderr)
+                try:
+                    save_response = input("Save token to system keychain for future use? (y/n): ")
+                    if save_response.lower() in ['y', 'yes']:
+                        if save_github_token_to_keychain(token):
+                            print("Token saved to keychain successfully.", file=sys.stderr)
+                        else:
+                            print("Failed to save token to keychain.", file=sys.stderr)
+                except (KeyboardInterrupt, EOFError):
+                    pass
+
+            # Call the callback to update headers if provided
+            if update_headers_callback:
+                update_headers_callback(token)
+
+            print("", file=sys.stderr)
+            print("Retrying request with new token...", file=sys.stderr)
+            return token
+        else:
+            print(f"Token validation failed: {error_msg}", file=sys.stderr)
+            if attempt < max_attempts - 1:
+                print(f"Please try again ({max_attempts - attempt - 1} attempts remaining).", file=sys.stderr)
+
+    print("", file=sys.stderr)
+    print("Maximum attempts exceeded. Please verify your token and try again.", file=sys.stderr)
+    return None
 
 
 def main():

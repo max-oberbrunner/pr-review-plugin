@@ -49,6 +49,12 @@ try:
 except ImportError:
     ERROR_MESSAGES_AVAILABLE = False
 
+try:
+    from token_manager import renew_ado_token
+    TOKEN_RENEWAL_AVAILABLE = True
+except ImportError:
+    TOKEN_RENEWAL_AVAILABLE = False
+
 
 class ADOCommentFetcher:
     """Handles fetching and formatting Azure DevOps PR comments."""
@@ -59,11 +65,17 @@ class ADOCommentFetcher:
         self.repo = repo
         self.token = token
         self.debug = debug
+        self._token_renewed = False  # Track if token was already renewed this session
         self.base_url = f"https://dev.azure.com/{quote(org)}/{quote(project)}/_apis/git"
         self.headers = {
             "Authorization": f"Basic {self._encode_token(token)}",
             "Content-Type": "application/json"
         }
+
+    def _update_token(self, new_token: str):
+        """Update the token and headers with a new token."""
+        self.token = new_token
+        self.headers["Authorization"] = f"Basic {self._encode_token(new_token)}"
 
     def _debug_log(self, message: str):
         """Log debug messages if debug mode is enabled."""
@@ -89,6 +101,16 @@ class ADOCommentFetcher:
             response = requests.get(url, headers=self.headers, params=params)
             self._debug_log(f"Response status: {response.status_code}")
 
+            # Handle 401 with token renewal
+            if response.status_code == 401 and not self._token_renewed and TOKEN_RENEWAL_AVAILABLE:
+                self._debug_log("Token expired, attempting renewal...")
+                new_token = renew_ado_token(self.org, self._update_token)
+                if new_token:
+                    self._token_renewed = True
+                    # Retry the request with the new token
+                    response = requests.get(url, headers=self.headers, params=params)
+                    self._debug_log(f"Retry response status: {response.status_code}")
+
             response.raise_for_status()
             data = response.json()
 
@@ -110,11 +132,11 @@ class ADOCommentFetcher:
             else:
                 # Fallback to simple error messages
                 if e.response.status_code == 401:
-                    print(f"Error: Authentication failed. Check your PAT token.", file=sys.stderr)
+                    print("Error: Authentication failed. Check your PAT token.", file=sys.stderr)
                 elif e.response.status_code == 404:
                     print(f"Error: PR #{pr_id} not found in repo '{self.repo}'", file=sys.stderr)
                 elif e.response.status_code == 403:
-                    print(f"Error: Access denied. Check your PAT token permissions.", file=sys.stderr)
+                    print("Error: Access denied. Check your PAT token permissions.", file=sys.stderr)
                 else:
                     print(f"Error: HTTP {e.response.status_code} - {e.response.text}", file=sys.stderr)
             sys.exit(1)
@@ -122,7 +144,7 @@ class ADOCommentFetcher:
             if ERROR_MESSAGES_AVAILABLE:
                 print(timeout_error(60), file=sys.stderr)
             else:
-                print(f"Error: Request timed out after 60 seconds", file=sys.stderr)
+                print("Error: Request timed out after 60 seconds", file=sys.stderr)
             sys.exit(1)
         except requests.exceptions.RequestException as e:
             if ERROR_MESSAGES_AVAILABLE:
