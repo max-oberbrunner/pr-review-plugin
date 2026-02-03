@@ -23,26 +23,26 @@ COMMAND_FILE="$PLUGIN_DIR/commands/pr-review.md"
 
 # Print functions
 print_success() {
-    echo -e "${GREEN}✓${NC} $1"
+    echo -e "${GREEN}[OK]${NC} $1"
 }
 
 print_error() {
-    echo -e "${RED}✗${NC} $1"
+    echo -e "${RED}[X]${NC} $1"
 }
 
 print_info() {
-    echo -e "${BLUE}ℹ${NC} $1"
+    echo -e "${BLUE}[i]${NC} $1"
 }
 
 print_warning() {
-    echo -e "${YELLOW}⚠${NC} $1"
+    echo -e "${YELLOW}[!]${NC} $1"
 }
 
 print_header() {
     echo ""
-    echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
+    echo -e "${BLUE}===============================================${NC}"
     echo -e "${BLUE}  PR Review Plugin - Installation${NC}"
-    echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
+    echo -e "${BLUE}===============================================${NC}"
     echo ""
 }
 
@@ -298,9 +298,9 @@ run_setup_wizard() {
 # Print next steps
 print_next_steps() {
     echo ""
-    echo -e "${GREEN}═══════════════════════════════════════════════${NC}"
-    echo -e "${GREEN}  Installation Complete! 🎉${NC}"
-    echo -e "${GREEN}═══════════════════════════════════════════════${NC}"
+    echo -e "${GREEN}===============================================${NC}"
+    echo -e "${GREEN}  Installation Complete!${NC}"
+    echo -e "${GREEN}===============================================${NC}"
     echo ""
     echo "Next steps:"
     echo ""
@@ -318,8 +318,8 @@ print_next_steps() {
     echo "   - Customization: docs/CUSTOMIZATION.md"
     echo ""
     echo "Need help? Check out:"
-    echo "  📖 Documentation: https://github.com/YOUR-USERNAME/pr-review-plugin"
-    echo "  🐛 Issues: https://github.com/YOUR-USERNAME/pr-review-plugin/issues"
+    echo "  * Documentation: https://github.com/YOUR-USERNAME/pr-review-plugin"
+    echo "  * Issues: https://github.com/YOUR-USERNAME/pr-review-plugin/issues"
     echo ""
 }
 

@@ -24,33 +24,33 @@ $CommandFile = Join-Path $PluginDir "commands\pr-review.md"
 # Color helper functions
 function Write-Success {
     param([string]$Message)
-    Write-Host "✓ " -ForegroundColor Green -NoNewline
+    Write-Host "[OK] " -ForegroundColor Green -NoNewline
     Write-Host $Message
 }
 
 function Write-ErrorMessage {
     param([string]$Message)
-    Write-Host "✗ " -ForegroundColor Red -NoNewline
+    Write-Host "[X] " -ForegroundColor Red -NoNewline
     Write-Host $Message
 }
 
 function Write-Info {
     param([string]$Message)
-    Write-Host "ℹ " -ForegroundColor Blue -NoNewline
+    Write-Host "[i] " -ForegroundColor Blue -NoNewline
     Write-Host $Message
 }
 
 function Write-Warning {
     param([string]$Message)
-    Write-Host "⚠ " -ForegroundColor Yellow -NoNewline
+    Write-Host "[!] " -ForegroundColor Yellow -NoNewline
     Write-Host $Message
 }
 
 function Write-Header {
     Write-Host ""
-    Write-Host "═══════════════════════════════════════════════" -ForegroundColor Blue
+    Write-Host "===============================================" -ForegroundColor Blue
     Write-Host "  PR Review Plugin - Windows Installation" -ForegroundColor Blue
-    Write-Host "═══════════════════════════════════════════════" -ForegroundColor Blue
+    Write-Host "===============================================" -ForegroundColor Blue
     Write-Host ""
 }
 
@@ -251,7 +251,8 @@ function Install-Command {
                     Write-Info "Updates to the plugin will be automatically available"
                 }
                 catch {
-                    Write-ErrorMessage "Failed to create symlink: $_"
+                    $symlinkErr = $_.Exception.Message
+                    Write-ErrorMessage "Failed to create symlink: $symlinkErr"
                     Write-Info "Falling back to copy method..."
                     Copy-Item $CommandFile $targetFile -Force
                     Write-Success "Copied command to: $targetFile"
@@ -280,7 +281,8 @@ function Install-Command {
                     Write-Info "Updates to the plugin will be automatically available"
                 }
                 catch {
-                    Write-ErrorMessage "Failed to create symlink: $_"
+                    $symlinkErr = $_.Exception.Message
+                    Write-ErrorMessage "Failed to create symlink: $symlinkErr"
                     Write-Info "Falling back to copy method..."
                     Copy-Item $CommandFile $targetFile -Force
                     Write-Success "Copied command to: $targetFile"
@@ -371,13 +373,11 @@ function New-ConfigFileManual {
     Write-Host "   python $ScriptDir\setup_ado.py" -ForegroundColor Blue
     Write-Host ""
     Write-Host "Or manually create .claude/pr-review.json in your project root:" -ForegroundColor Cyan
-    Write-Host @"
-   {
-     "organization": "your-org",
-     "project": "your-project",
-     "repository": "your-repo"
-   }
-"@ -ForegroundColor Gray
+    Write-Host '   {' -ForegroundColor Gray
+    Write-Host '     "organization": "your-org",' -ForegroundColor Gray
+    Write-Host '     "project": "your-project",' -ForegroundColor Gray
+    Write-Host '     "repository": "your-repo"' -ForegroundColor Gray
+    Write-Host '   }' -ForegroundColor Gray
     Write-Host ""
     Write-Info "Token configuration:"
     Write-Host "  Set environment variable: `$env:AZURE_DEVOPS_PAT = 'your-token'" -ForegroundColor Blue
@@ -399,7 +399,8 @@ function Test-Installation {
             Write-Success "Command file is readable"
         }
         catch {
-            Write-ErrorMessage "Command file is not readable: $_"
+            $readErr = $_.Exception.Message
+            Write-ErrorMessage "Command file is not readable: $readErr"
             return $false
         }
 
@@ -413,9 +414,9 @@ function Test-Installation {
 
 function Write-NextSteps {
     Write-Host ""
-    Write-Host "═══════════════════════════════════════════════" -ForegroundColor Green
-    Write-Host "  Installation Complete! 🎉" -ForegroundColor Green
-    Write-Host "═══════════════════════════════════════════════" -ForegroundColor Green
+    Write-Host "===============================================" -ForegroundColor Green
+    Write-Host "  Installation Complete!" -ForegroundColor Green
+    Write-Host "===============================================" -ForegroundColor Green
     Write-Host ""
     Write-Host "Next steps:"
     Write-Host ""
@@ -447,9 +448,9 @@ function Write-NextSteps {
     Write-Host "   /pr-review 12345" -ForegroundColor Blue
     Write-Host ""
     Write-Host "Documentation:"
-    Write-Host "  📖 Usage examples: $PluginDir\docs\EXAMPLES.md"
-    Write-Host "  🔧 Customization: $PluginDir\docs\CUSTOMIZATION.md"
-    Write-Host "  📥 Installation: $PluginDir\docs\INSTALLATION.md"
+    Write-Host "  * Usage examples: $PluginDir\docs\EXAMPLES.md"
+    Write-Host "  * Customization: $PluginDir\docs\CUSTOMIZATION.md"
+    Write-Host "  * Installation: $PluginDir\docs\INSTALLATION.md"
     Write-Host ""
 }
 
@@ -481,7 +482,8 @@ function Start-Installation {
         }
     }
     catch {
-        Write-ErrorMessage "Installation failed: $_"
+        $errMsg = $_.Exception.Message
+        Write-ErrorMessage "Installation failed: $errMsg"
         Write-Host $_.ScriptStackTrace
         exit 1
     }
