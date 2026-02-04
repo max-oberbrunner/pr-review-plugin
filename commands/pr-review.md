@@ -61,49 +61,104 @@ If the user is prompted for a token, they enter it directly in the terminal. Thi
 
 ## Workflow
 
-### Step 0: Prerequisites Check
+### Step 0: Fetch PR Data (Single Command)
 
-Before fetching comments, verify the project is configured:
+Run the orchestrator script to get everything in one call:
 
-1. Check if `.claude/pr-review.json` exists in the project root (detected via .git folder)
-2. If the script outputs `[CONFIG_MISSING]`, inform user:
-
-   ```
-   This project hasn't been configured for PR Review yet.
-   
-   Run the appropriate setup wizard from your project directory:
-   
-   # For GitHub:
-   python /path/to/pr-review-plugin/scripts/setup_github.py
-   
-   # For Azure DevOps:
-   python /path/to/pr-review-plugin/scripts/setup_ado.py
-   
-   The wizard will prompt for repository details and PAT token (saved to system keychain).
-   ```
-
-3. Wait for user to complete setup, then proceed to Step 1
-
-### Step 1: Fetch Comments
-
-Read config and execute:
 ```bash
-{pythonPath} {scriptPath} \
-  --org {organization} \
-  --project {project} \
-  --repo {repository} \
-  --pr {PR_NUMBER} \
-  --format claude
+python {plugin_path}/scripts/run_pr_review.py {PR_NUMBER} --json
 ```
 
-The script outputs comments categorized by priority:
-- 🔴 Critical (architecture, patterns, dependencies)
-- 🟡 Important (validation, error handling, code quality)
-- 🟢 Style (formatting, naming, best practices)
+This returns a JSON object with:
+- `success`: boolean
+- `pr`: PR number
+- `platform`: "azure-devops" or "github"
+- `projectRoot`: absolute path
+- `changedFiles`: list of changed files with paths and change types
+- `commands`: execution plan with **command content included**
+- `summary`: file counts (added, modified, deleted)
+- `commandsSummary`: command names and file counts
 
-### Step 2: Create Task List
+**If `success` is false**, check the `error` field:
+- `[CONFIG_MISSING]`: Project not configured - guide user to run setup wizard
+- `[AUTH_MISSING]`: No token - guide user to save PAT to keychain
+- `[PR_NOT_FOUND]`: Invalid PR number or wrong repository config
 
-Use **TodoWrite** to create a checklist of all active comments:
+### Step 1: Run Code Analysis Commands (if enabled)
+
+Check if `commands.enabled` is `true` in the JSON response. If so:
+
+**1.1 Launch Analysis Subagents in Parallel**
+
+For each command in `commands.commands[]`, launch a **Task** subagent:
+
+```
+Task: Run {command.name} analysis
+Subagent type: general-purpose
+Prompt: |
+  You are analyzing code for PR #{PR_NUMBER} review.
+
+  **Project root:** {projectRoot}
+
+  **Command instructions:**
+  {command.content}
+
+  **Files to analyze ({command.fileCount} files):**
+  {command.files joined by newlines}
+
+  Read each file and check for violations. Return findings as structured markdown:
+  - File path and line number for each issue
+  - Brief description of the issue
+  - Severity (critical/important/style)
+```
+
+Launch up to `commands.maxConcurrent` (default: 3) in parallel.
+
+**1.2 Aggregate and Present Results**
+
+After subagents complete, show summary:
+
+```
+## Code Analysis Results
+
+**Commands Run:** {count}
+**Files Analyzed:** {total}
+**Issues Found:** {total_issues}
+
+### {command_name} ({issue_count} issues)
+| Severity | File | Issue |
+|----------|------|-------|
+| Important | path/file.ts:42 | Description |
+...
+```
+
+**1.3 Ask User How to Proceed**
+
+```
+Found {X} code analysis issues across {Y} files.
+
+Would you like to:
+  A) Address these issues first, then PR comments
+  B) Skip to PR comments
+  C) See detailed breakdown
+```
+
+### Step 2: Fetch PR Comments
+
+Run the comment fetcher:
+```bash
+python {plugin_path}/scripts/fetch_pr_comments.py \
+  --org {organization} --project {project} --repo {repository} --pr {PR_NUMBER}
+```
+
+The script outputs comments in markdown format with:
+- File comments grouped by location
+- Thread status (active/fixed/closed)
+- Reviewer names and comment content
+
+### Step 3: Create Task List
+
+Use **TaskCreate** to create a checklist of all active comments:
 
 ```
 1. Fix [issue] in [file:line]
@@ -111,7 +166,7 @@ Use **TodoWrite** to create a checklist of all active comments:
 ...
 ```
 
-### Step 3: Interactive Review
+### Step 4: Interactive Review
 
 Present the categorized comments to the user:
 
@@ -135,16 +190,16 @@ Which should we tackle first?
   C) Let me choose
 ```
 
-### Step 4: Address Each Comment
+### Step 5: Address Each Comment
 
 For each issue:
 
-**4.1 Show Context**
+**5.1 Show Context**
 - Use **Read** tool to show current code at file:line
 - Display the reviewer's comment
 - Explain what needs to change and why
 
-**4.2 Provide Insight**
+**5.2 Provide Insight**
 ```
 ★ Insight ─────────────────────────────────────
 {Educational context about the issue}
@@ -153,7 +208,7 @@ For each issue:
 ─────────────────────────────────────────────────
 ```
 
-**4.3 Implement Fix**
+**5.3 Implement Fix**
 
 **If straightforward (<5 lines, clear pattern):**
 - Implement using **Edit** tool
@@ -174,16 +229,16 @@ For each issue:
 - Wait for user implementation
 - Mark todo as completed after user finishes
 
-**4.4 Update Progress**
+**5.4 Update Progress**
 - Mark current todo as completed
 - Move to next in_progress item
 - One todo in_progress at a time
 
-### Step 5: Completion
+### Step 6: Completion
 
 After all issues addressed:
 
-**5.1 Summary**
+**6.1 Summary**
 ```
 ✅ All {X} comments addressed!
 
@@ -193,7 +248,7 @@ Changes made:
   ...
 ```
 
-**5.2 Next Steps**
+**6.2 Next Steps**
 ```
 Would you like me to:
   A) Create a commit with these changes

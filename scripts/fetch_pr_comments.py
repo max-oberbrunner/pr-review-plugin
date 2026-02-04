@@ -50,10 +50,12 @@ except ImportError:
     ERROR_MESSAGES_AVAILABLE = False
 
 try:
-    from token_manager import renew_ado_token
+    from token_manager import renew_ado_token, resolve_token
     TOKEN_RENEWAL_AVAILABLE = True
+    TOKEN_RESOLVE_AVAILABLE = True
 except ImportError:
     TOKEN_RENEWAL_AVAILABLE = False
+    TOKEN_RESOLVE_AVAILABLE = False
 
 
 class ADOCommentFetcher:
@@ -387,10 +389,18 @@ Examples:
 
     args = parser.parse_args()
 
-    # Get token from args or environment
-    token = args.token or os.getenv("AZURE_DEVOPS_PAT")
+    # Get token from args, environment, keychain, or prompt
+    token = args.token
     if not token:
-        print("Error: No token provided. Use --token or set AZURE_DEVOPS_PAT environment variable", file=sys.stderr)
+        if TOKEN_RESOLVE_AVAILABLE:
+            token, source = resolve_token(prompt_if_missing=True)
+            if token and source != 'prompt':
+                print(f"[INFO] Using token from {source}", file=sys.stderr)
+        else:
+            token = os.getenv("AZURE_DEVOPS_PAT")
+
+    if not token:
+        print("Error: No token provided. Use --token, set AZURE_DEVOPS_PAT environment variable, or save to keychain with: python scripts/token_manager.py --save", file=sys.stderr)
         sys.exit(1)
 
     # Fetch comments
@@ -405,13 +415,10 @@ Examples:
         # Determine working directory (legacy fallback for status file)
         working_dir = Path(args.output).parent if args.output else Path.cwd()
 
-        # Load status tracker with centralized storage (org/project/repo)
+        # Load status tracker
         status_tracker = create_status_tracker(
             args.pr,
-            working_dir=working_dir,
-            org=args.org,
-            project=args.project,
-            repo=args.repo
+            project_root=working_dir
         )
         if status_tracker.statuses:
             if not args.debug:

@@ -279,6 +279,138 @@ def run_fetch_script(config, pr_number, output_file, token):
         return run_ado_fetch_script(config, pr_number, output_file, token)
 
 
+def run_fetch_changed_files(config, pr_number, token, project_root):
+    """Execute fetch_changed_files.py and return the results."""
+    script_path = Path(__file__).parent / "fetch_changed_files.py"
+    python_path = config.get('pythonPath', sys.executable)
+    platform = config.get('platform', 'azure-devops')
+
+    cmd = [python_path, str(script_path), '--pr', str(pr_number), '--token', token]
+
+    if platform == 'github':
+        cmd.extend(['--platform', 'github', '--owner', config['owner'], '--repo', config['repository']])
+    else:
+        cmd.extend(['--platform', 'azure-devops', '--org', config['organization'],
+                    '--project', config['project'], '--repo', config['repository']])
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        if result.returncode != 0:
+            print(f"[WARNING] Failed to fetch changed files: {result.stderr}", file=sys.stderr)
+            return None
+
+        # Parse JSON output (stdout contains the JSON, stderr has info messages)
+        return json.loads(result.stdout)
+    except subprocess.TimeoutExpired:
+        print("[WARNING] Fetch changed files timed out", file=sys.stderr)
+        return None
+    except json.JSONDecodeError as e:
+        print(f"[WARNING] Failed to parse changed files output: {e}", file=sys.stderr)
+        return None
+    except Exception as e:
+        print(f"[WARNING] Error fetching changed files: {e}", file=sys.stderr)
+        return None
+
+
+def run_command_runner(config, changed_files_data, project_root):
+    """Execute command_runner.py and return the execution plan."""
+    script_path = Path(__file__).parent / "command_runner.py"
+    python_path = config.get('pythonPath', sys.executable)
+    config_path = project_root / ".claude" / "pr-review.json"
+
+    # Write changed files to temp file
+    import tempfile
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
+        json.dump(changed_files_data, f)
+        temp_file = f.name
+
+    try:
+        cmd = [
+            python_path, str(script_path),
+            '--config', str(config_path),
+            '--project-root', str(project_root),
+            '--changed-files', temp_file
+        ]
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+        if result.returncode != 0:
+            print(f"[WARNING] Command runner failed: {result.stderr}", file=sys.stderr)
+            return None
+
+        return json.loads(result.stdout)
+    except Exception as e:
+        print(f"[WARNING] Error running command runner: {e}", file=sys.stderr)
+        return None
+    finally:
+        # Clean up temp file
+        try:
+            Path(temp_file).unlink()
+        except Exception:
+            pass
+
+
+def enrich_command_plan_with_content(command_plan, project_root):
+    """Read command file contents and add them to the execution plan."""
+    if not command_plan or not command_plan.get('enabled'):
+        return command_plan
+
+    commands = command_plan.get('commands', [])
+    enriched_commands = []
+
+    for cmd in commands:
+        cmd_path = Path(cmd.get('path', ''))
+        if cmd_path.exists():
+            try:
+                with open(cmd_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                cmd['content'] = content
+            except Exception as e:
+                cmd['content'] = f"[ERROR] Failed to read: {e}"
+                cmd['contentError'] = str(e)
+        else:
+            cmd['content'] = None
+            cmd['contentError'] = "File not found"
+
+        enriched_commands.append(cmd)
+
+    command_plan['commands'] = enriched_commands
+    return command_plan
+
+
+def generate_full_output(pr_number, config, project_root, token, changed_files_data, command_plan, comments_file):
+    """Generate comprehensive JSON output with everything Claude needs."""
+    platform = config.get('platform', 'azure-devops')
+
+    output = {
+        "success": True,
+        "pr": pr_number,
+        "platform": platform,
+        "projectRoot": str(project_root),
+        "changedFiles": changed_files_data,
+        "commands": command_plan,
+        "commentsFile": str(comments_file) if comments_file else None
+    }
+
+    # Add PR info summary
+    if changed_files_data:
+        output["summary"] = {
+            "totalFiles": changed_files_data.get('totalFiles', 0),
+            "added": changed_files_data.get('summary', {}).get('added', 0),
+            "modified": changed_files_data.get('summary', {}).get('modified', 0),
+            "deleted": changed_files_data.get('summary', {}).get('deleted', 0)
+        }
+
+    if command_plan and command_plan.get('enabled'):
+        output["commandsSummary"] = {
+            "totalCommands": command_plan.get('totalCommands', 0),
+            "totalFilesToAnalyze": command_plan.get('totalFiles', 0),
+            "commandNames": [c.get('name') for c in command_plan.get('commands', [])]
+        }
+
+    return output
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='PR Review Wrapper - Fetches PR comments from Azure DevOps or GitHub'
@@ -287,6 +419,12 @@ def main():
     parser.add_argument('--output', '-o', help='Output file path (default: pr-{NUMBER}-comments.md in current directory)')
     parser.add_argument('--config', help='Path to config file (default: .claude/pr-review.json in project root)')
     parser.add_argument('--token', help='Override token (use AZURE_DEVOPS_PAT or GITHUB_PAT env var based on platform)')
+    parser.add_argument('--skip-commands', action='store_true',
+        help='Skip command execution, only fetch PR comments')
+    parser.add_argument('--commands-only', action='store_true',
+        help='Run commands only, skip PR comment fetching')
+    parser.add_argument('--json', action='store_true',
+        help='Output everything as single JSON (for Claude automation)')
 
     args = parser.parse_args()
 
@@ -363,6 +501,58 @@ def main():
         output_file = Path(args.output)
     else:
         output_file = Path.cwd() / f"pr-{args.pr_number}-comments.md"
+
+    # Check for commands configuration
+    commands_config = config.get('commands', {})
+    commands_enabled = commands_config.get('enabled', False) and not args.skip_commands
+
+    # Handle command execution if enabled
+    changed_files_data = None
+    command_plan = None
+
+    if commands_enabled or args.commands_only:
+        print(f"[INFO] Fetching changed files for PR #{args.pr_number}...", file=sys.stderr)
+        changed_files_data = run_fetch_changed_files(config, args.pr_number, token, project_root)
+
+        if changed_files_data:
+            print(f"[INFO] Found {changed_files_data.get('totalFiles', 0)} changed files", file=sys.stderr)
+
+            # Get command execution plan
+            command_plan = run_command_runner(config, changed_files_data, project_root)
+
+            if command_plan and command_plan.get('enabled'):
+                total_commands = command_plan.get('totalCommands', 0)
+                total_files = command_plan.get('totalFiles', 0)
+                print(f"[INFO] Command plan: {total_commands} commands, {total_files} files to analyze", file=sys.stderr)
+
+                # Enrich with command file contents
+                command_plan = enrich_command_plan_with_content(command_plan, project_root)
+
+                # Output command plan for the workflow to use
+                command_plan_file = Path.cwd() / f"pr-{args.pr_number}-commands.json"
+                with open(command_plan_file, 'w', encoding='utf-8') as f:
+                    json.dump(command_plan, f, indent=2)
+                print(f"[COMMANDS] {command_plan_file}", file=sys.stderr)
+        else:
+            print("[WARNING] Could not fetch changed files, skipping commands", file=sys.stderr)
+
+    # If commands-only mode, exit after command preparation
+    if args.commands_only:
+        if command_plan and command_plan.get('enabled'):
+            print(f"[SUCCESS] Command plan saved to: pr-{args.pr_number}-commands.json", file=sys.stderr)
+            sys.exit(0)
+        else:
+            print("[INFO] No commands to execute", file=sys.stderr)
+            sys.exit(0)
+
+    # If --json mode, output full structured data and exit
+    if args.json:
+        full_output = generate_full_output(
+            args.pr_number, config, project_root, token,
+            changed_files_data, command_plan, output_file
+        )
+        print(json.dumps(full_output, indent=2))
+        sys.exit(0)
 
     if platform == 'github':
         print(f"[INFO] Fetching PR #{args.pr_number} from GitHub...", file=sys.stderr)
