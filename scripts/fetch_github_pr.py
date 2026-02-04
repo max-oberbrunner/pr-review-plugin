@@ -35,6 +35,12 @@ try:
 except ImportError:
     ERROR_MESSAGES_AVAILABLE = False
 
+try:
+    from token_manager import renew_github_token
+    TOKEN_RENEWAL_AVAILABLE = True
+except ImportError:
+    TOKEN_RENEWAL_AVAILABLE = False
+
 
 class GitHubPRFetcher:
     """Handles fetching and formatting GitHub PR information."""
@@ -53,12 +59,18 @@ class GitHubPRFetcher:
         self.repo = repo
         self.token = token
         self.debug = debug
+        self._token_renewed = False  # Track if token was already renewed this session
         self.base_url = "https://api.github.com"
         self.headers = {
             "Authorization": f"Bearer {token}",
             "Accept": "application/vnd.github.v3+json",
             "X-GitHub-Api-Version": "2022-11-28"
         }
+
+    def _update_token(self, new_token: str):
+        """Update the token and headers with a new token."""
+        self.token = new_token
+        self.headers["Authorization"] = f"Bearer {new_token}"
 
     def _debug_log(self, message: str):
         """Log debug messages if debug mode is enabled."""
@@ -108,6 +120,16 @@ class GitHubPRFetcher:
         try:
             response = requests.get(url, headers=self.headers, timeout=30)
             self._debug_log(f"PR info response status: {response.status_code}")
+
+            # Handle 401 with token renewal
+            if response.status_code == 401 and not self._token_renewed and TOKEN_RENEWAL_AVAILABLE:
+                self._debug_log("Token expired, attempting renewal...")
+                new_token = renew_github_token(self._update_token)
+                if new_token:
+                    self._token_renewed = True
+                    # Retry the request with the new token
+                    response = requests.get(url, headers=self.headers, timeout=30)
+                    self._debug_log(f"Retry response status: {response.status_code}")
 
             if response.status_code != 200:
                 self._handle_error(response, pr_number)
